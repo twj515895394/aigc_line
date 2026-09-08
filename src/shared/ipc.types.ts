@@ -357,6 +357,12 @@ export interface ComfyWorkflowInfo {
   kind: ComfyWorkflowKind;
 }
 
+export type VideoAnalysisProvider = 'qwen' | 'gemini';
+export interface ReverseProxyModel { id: string; name: string }
+export interface ListReverseProxyModelsRequest { baseUrl: string; apiKey?: string }
+export interface ListReverseProxyModelsResult { success: boolean; message: string; models: ReverseProxyModel[] }
+export interface TestReverseProxyConnectionRequest { baseUrl: string; apiKey?: string }
+
 export interface AppSettingsView {
   comfyuiBaseUrl: string;
   agentBaseUrl: string;
@@ -371,6 +377,17 @@ export interface AppSettingsView {
   seedreamApiKey: string;
   seedreamApiKeyConfigured: boolean;
   defaultImageWorkflowId: string;
+  videoAnalysisProvider: VideoAnalysisProvider;
+  geminiBaseUrl: string;
+  geminiApiKey: string;
+  geminiApiKeyConfigured: boolean;
+  geminiAnalysisModelId: string;
+  geminiEnabledImageModelIds: string[];
+  gptGrokBaseUrl: string;
+  gptGrokApiKey: string;
+  gptGrokApiKeyConfigured: boolean;
+  gptGrokEnabledImageModelIds: string[];
+  gptGrokEnabledVideoModelIds: string[];
 }
 
 export interface SaveAppSettingsRequest {
@@ -388,6 +405,17 @@ export interface SaveAppSettingsRequest {
   seedreamBaseUrl: string;
   seedreamApiKey?: string;
   clearSeedreamApiKey?: boolean;
+  videoAnalysisProvider?: VideoAnalysisProvider;
+  geminiBaseUrl?: string;
+  geminiApiKey?: string;
+  clearGeminiApiKey?: boolean;
+  geminiAnalysisModelId?: string;
+  geminiEnabledImageModelIds?: string[];
+  gptGrokBaseUrl?: string;
+  gptGrokApiKey?: string;
+  clearGptGrokApiKey?: boolean;
+  gptGrokEnabledImageModelIds?: string[];
+  gptGrokEnabledVideoModelIds?: string[];
 }
 
 export interface TestQwenConnectionRequest {
@@ -542,7 +570,7 @@ export interface GenerationTaskSummary {
   id: string;
   projectId: string;
   nodeId: string;
-  provider: 'comfyui' | 'seedance' | 'google' | 'seedream';
+  provider: 'comfyui' | 'seedance' | 'google' | 'seedream' | 'gemini-proxy' | 'gpt-grok';
   operation: 'image' | 'video' | 'upscale' | 'extract-audio';
   status: 'submitting' | 'running' | 'succeeded' | 'failed' | 'unknown';
   taskId?: string;

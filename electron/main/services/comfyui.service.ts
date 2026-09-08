@@ -27,6 +27,7 @@ import { getRuntimeSettings } from './settings.service'
 import { GOOGLE_IMAGE_MODELS } from './google-image.service'
 import { SEEDREAM_IMAGE_MODELS } from './seedream-image.service'
 import { SEEDANCE_VIDEO_MODELS } from './seedance-video.service'
+import { listEnabledReverseProxyWorkflows } from '../../../src/shared/reverse-proxy-workflows'
 
 type WorkflowNode = {
   class_type: string
@@ -122,7 +123,7 @@ const VIDEO_WORKFLOWS: VideoWorkflowTemplate[] = [
 ]
 
 export const listComfyWorkflows = async (): Promise<ComfyWorkflowInfo[]> => {
-  const { defaultImageWorkflowId } = await getRuntimeSettings()
+  const settings = await getRuntimeSettings()
   const googleImageWorkflows: ComfyWorkflowInfo[] = GOOGLE_IMAGE_MODELS.map(({ id, name }) => ({
     id,
     name,
@@ -138,8 +139,9 @@ export const listComfyWorkflows = async (): Promise<ComfyWorkflowInfo[]> => {
     name,
     kind: 'image-to-video',
   }))
-  return [...WORKFLOW_TEMPLATES, ...googleImageWorkflows, ...seedreamImageWorkflows, ...VIDEO_WORKFLOWS, ...seedanceVideoWorkflows]
-    .sort((a, b) => Number(b.id === defaultImageWorkflowId) - Number(a.id === defaultImageWorkflowId))
+  const reverseProxyWorkflows = listEnabledReverseProxyWorkflows(settings)
+  return [...WORKFLOW_TEMPLATES, ...googleImageWorkflows, ...seedreamImageWorkflows, ...VIDEO_WORKFLOWS, ...seedanceVideoWorkflows, ...reverseProxyWorkflows]
+    .sort((a, b) => Number(b.id === settings.defaultImageWorkflowId) - Number(a.id === settings.defaultImageWorkflowId))
     .map(({ id, name, kind }) => ({ id, name, kind }))
 }
 

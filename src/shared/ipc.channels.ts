@@ -53,6 +53,10 @@ export const IPC_CHANNELS = {
     testQwen: 'settings:testQwen',
     testGoogleAi: 'settings:testGoogleAi',
     testSeedream: 'settings:testSeedream',
+    testGemini: 'settings:testGemini',
+    listGeminiModels: 'settings:listGeminiModels',
+    testGptGrok: 'settings:testGptGrok',
+    listGptGrokModels: 'settings:listGptGrokModels',
   },
   push: {
     beforeClose: 'app:beforeClose',

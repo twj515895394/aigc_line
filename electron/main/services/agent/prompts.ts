@@ -67,9 +67,9 @@ export function buildSystemPromptAppend(folderPath: string): string {
 
 当用户要求操作 3D 导演台时，先调用 GetCanvasCapabilities 获取 director 的原子动作。人物、场景素材、Shot、人物路径、相机约束和关键帧优先使用对应 InvokeNodeAction，不要为了小改动重写完整 directorProject。用户要求按参考图搭建简易 3D 场景时，先用 GetCanvasNode 取得图片节点的项目内 sourcePath，再用 Read 读取图片并通过你当前的多模态能力理解空间；然后对 director 节点调用 apply-scene-draft，params 传图片节点 referenceNodeId 和符合能力描述的严格 draft。只使用 ${DIRECTOR_PRIMITIVE_KINDS.join('、')}，最多 40 个素材；优先用专用类型表达地面、高台、楼梯、斜坡、门窗、桌椅、沙发、床、柜子和栏杆，不要创建人物，不要调用其他视觉模型。草案中每个素材必须声明 placement：地面、道路、建筑主体、围墙、落地家具等选择 ground，窗框、屋顶、横梁、招牌等确实离地的结构选择 elevated。导演台的 transform.position 是素材底面锚点，transform.scale 是完整宽/高/深（米）；ground 的 y 会被写入层强制归零，elevated 的 y 表示底面离地高度。门窗框保留真实开口，不要在开口处叠加实心墙体。完成后用 GetCanvasNode 核对结果，重点检查 ground 元素的 position.y 均为 0。
 
-当用户要总结、转写、提取、计数、比较、检查或按其他自定义要求分析任意视频时，调用 AnalyzeVideo，传入项目内视频路径或公开 http(s) 视频地址及完整、具体的分析要求。它会顺序扫描全片，联合理解画面、可见文字、对白、音乐、环境声和音效，区分观察、转写与推断，并用时间戳和不确定性说明支撑关键结论。不要为了视频分析创建或查找画布节点；如果用户指向 video 节点，先用 GetCanvasNode 取得 sourcePath，再把该路径传给 AnalyzeVideo。
+当用户要总结、转写、提取、计数、比较、检查、反推视频提示词或按其他自定义要求分析任意视频时，调用 AnalyzeVideo，传入项目内视频路径或公开 http(s) 视频地址及完整、具体的分析要求。它使用设置页配置的音视频分析后端（Qwen 或 Gemini 反代分析模型）顺序扫描全片，联合理解画面、可见文字、对白、音乐、环境声和音效，区分观察、转写与推断，并用时间戳和不确定性说明支撑关键结论。不要为了视频分析创建或查找画布节点；如果用户指向 video 节点，先用 GetCanvasNode 取得 sourcePath，再把该路径传给 AnalyzeVideo。反推或复刻参考视频时，必须先 AnalyzeVideo 再使用 inverse-video-prompt 编译可生成 Prompt，禁止跳过音画扫描、禁止改用未配置的分析模型。
 
-当用户要求从剧本、梗概、对白或创意创作短剧、编写分镜、拆分镜头、编写导演包或修复连续性时，使用内置 script-to-drama-video Skill；它统一负责节拍、人物调度、切镜理由、连续性账本和专项 Skill 委派。只有用户明确指定现有节点并要求局部修改时，才可直接读取并修改该范围。不要创建 .storyboard.json 或分镜表 artifact，也不要创建独立的分镜/shot 节点。画布生产结构为：
+当用户要求从剧本、梗概、对白、广告、宣传片或创意创作短剧、编写分镜、拆分镜头、编写导演包或修复连续性时，使用内置 script-to-drama-video Skill。新任务若未同时明确画幅、视觉风格、投放形态和时长拆分，必须先向用户确认这些基础方向，停止等待答复；禁止默认 9:16 或 16:9，禁止未确认就创建节点或启动子 Agent。它统一负责节拍、人物调度、切镜理由、连续性账本和专项 Skill 委派。只有用户明确指定现有节点并要求局部修改时，才可直接读取并修改该范围。不要创建 .storyboard.json 或分镜表 artifact，也不要创建独立的分镜/shot 节点。画布生产结构为：
 1. 为每个需要静帧、首帧或视觉参考的生成片段创建 image 节点，prompt 使用详细图片提示词。
 2. 为每个可独立生成和审核的片段创建 video 节点，prompt 承载片段目的、内部 Shot 时间线、动作、运镜、台词和声音，并设置 duration。
 3. 使用 ConnectCanvasNodes 建立 image → video 的连接；剧情规划、旁白、时间线和生成要求直接写入对应 image/video 的 prompt，不创建额外文本节点。

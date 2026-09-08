@@ -4,7 +4,7 @@
 
 ![AIGC CANVAS AI drama creation harness](docs/screenshots/ai-drama-harness-workspace.png)
 
-AIGC CANVAS is a Harness Engineering desktop workbench for the complete AI drama production loop. For each character, the Agent first generates one canonical four-panel identity sheet, then derives scene, wardrobe, makeup, and state variants from that base through image-to-image. It also creates overhead panoramic environment references, builds the multimodal reference graph, generates videos, and reviews the resulting clips.
+AIGC CANVAS is a Harness Engineering desktop workbench for the complete AI drama production loop. For each character, the Agent first generates one canonical four-zone identity sheet, then derives scene, wardrobe, makeup, and state variants from that base through image-to-image. It also creates overhead panoramic environment references, builds the multimodal reference graph, generates videos, and reviews the resulting clips.
 
 ## Creative Workspace
 
@@ -15,7 +15,7 @@ Organize shots, reference images, generated videos, and upscaled outputs on one 
 ## Features
 
 - **Script-to-AI-drama loop** covering script analysis, character/wardrobe assets, environment references, storyboarding, multimodal video generation, and final video review on the same live canvas.
-- **Character and environment consistency assets** with one canonical left-to-right head/front/side/back identity sheet per character; scene and wardrobe variants are image-to-image branches directly from that base, preventing identity drift. Environment versions use empty high-angle panoramic references.
+- **Character and environment consistency assets** with one canonical 16:9 four-zone sheet per character (headless front body, back body with rear head, neutral 3/4 close-up, matching smile close-up); scene and wardrobe variants are image-to-image branches directly from that base. Environment versions use empty high-angle panoramic references.
 - **Qwen audiovisual validation** accepts a video node ID (or an image that resolves to one downstream video), automatically resolves its prompt and ordered references, then uses Qwen3.5-Omni Plus to produce an evidence-based review.
 - **Project Agent** powered by @anthropic-ai/claude-agent-sdk, with a compact canvas overview and exact-id single-node detail tools plus live node creation, updates, deletion, and connections. Writes apply directly to node fields with last-write-wins semantics, so unrelated canvas changes do not reject them.
 - **Built-in Agent skills** ship as an app-owned local Claude Plugin. Project `.claude/skills` customizations remain supported and are never created or overwritten by the app.
@@ -116,7 +116,7 @@ Rebuilding from the same image replaces only unlocked geometry created from that
 
 1. Create a project and select a local workspace.
 2. Provide a script and invoke the bundled drama Skill. The Agent identifies stable character traits, scene-specific outfits, environment versions, key props, dialogue, and narration.
-3. Dedicated character and environment Skills create one canonical head/front/side/back sheet per character, derive scene/wardrobe variants from it with image-to-image, and create empty overhead panoramic environment references.
+3. Dedicated character and environment Skills create one canonical four-zone sheet per character via `image-prompt-skill`, derive scene/wardrobe variants from it with image-to-image, and create empty overhead panoramic environment references.
 4. The Agent breaks the script into independently generated 5/10/15-second segments, designs internal timed shots, creates one video node per segment, and connects its references directly.
 5. MiniMax H3 multimodal-reference mode abstracts ordered `<Picture n>` assets into stable `<Subject n>` references and generates each video from the official six-section Ref2VA structure, including shot cut points, dialogue, ambience, and retention rules.
 6. The Agent sends each resulting video and its audio track to Qwen3.5-Omni, then validates character, wardrobe, environment, action, camera, transitions, dialogue/narration, lip sync, and sound from timestamped evidence. Failed shots are revised and regenerated from the review findings.

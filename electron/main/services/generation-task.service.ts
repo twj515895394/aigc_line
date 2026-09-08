@@ -13,7 +13,7 @@ export interface PersistedGenerationTask {
   id: string
   projectId: string
   nodeId: string
-  provider: 'comfyui' | 'seedance' | 'google' | 'seedream'
+  provider: 'comfyui' | 'seedance' | 'google' | 'seedream' | 'gemini-proxy' | 'gpt-grok'
   operation: GenerationOperation
   status: 'submitting' | 'running' | 'succeeded' | 'failed' | 'unknown'
   taskId?: string
@@ -38,7 +38,7 @@ function captureRequest(request: GenerationRequest): GenerationRequest {
 async function readTask(file: string): Promise<PersistedGenerationTask | null> {
   try {
     const value = JSON.parse(await fs.readFile(file, 'utf8')) as PersistedGenerationTask
-    if (value.version !== 1 || !value.id || !value.nodeId || !value.request || !['comfyui', 'seedance', 'google', 'seedream'].includes(value.provider)) throw new Error('生成任务记录格式无效')
+    if (value.version !== 1 || !value.id || !value.nodeId || !value.request || !['comfyui', 'seedance', 'google', 'seedream', 'gemini-proxy', 'gpt-grok'].includes(value.provider)) throw new Error('生成任务记录格式无效')
     return value
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
@@ -48,7 +48,7 @@ async function readTask(file: string): Promise<PersistedGenerationTask | null> {
 
 /** Synchronous cloud APIs have no remote query ID; preserve completed outputs without retrying uncertain submissions. */
 export function runLocalGeneration(
-  options: { project: Project; provider: 'google' | 'seedream'; request: GenerateImageRequest },
+  options: { project: Project; provider: 'google' | 'seedream' | 'gemini-proxy' | 'gpt-grok'; request: GenerateImageRequest },
   generate: (markSubmitting: () => void) => Promise<GenerateVideoResult>,
 ): Promise<GenerateVideoResult> {
   let result: GenerateVideoResult | undefined
@@ -141,12 +141,18 @@ async function resumeTasks(project: Project, tasks: PersistedGenerationTask[]): 
     if (task.status !== 'running' || !task.taskId || (nextRecovery.get(file) ?? 0) > Date.now()) continue
     nextRecovery.set(file, Date.now() + 30_000)
     const request = task.request
-    if (task.provider === 'google' || task.provider === 'seedream') {
+    if (task.provider === 'google' || task.provider === 'seedream' || task.provider === 'gemini-proxy') {
       task.status = 'unknown'; task.error = '同步图片接口请求已中断，无法查询原提交状态，请先核实服务端结果'; task.updatedAt = Date.now()
       await writeTask(file, task)
     } else if (task.provider === 'seedance') {
       const service = await import('./seedance-video.service')
       void service.generateVideoWithSeedance(request as GenerateVideoRequest).catch(() => undefined)
+    } else if (task.provider === 'gpt-grok' && task.operation === 'video') {
+      const service = await import('./gpt-grok-proxy.service')
+      void service.generateVideoWithGptGrok(request as GenerateVideoRequest).catch(() => undefined)
+    } else if (task.provider === 'gpt-grok') {
+      task.status = 'unknown'; task.error = '同步图片接口请求已中断，无法查询原提交状态，请先核实服务端结果'; task.updatedAt = Date.now()
+      await writeTask(file, task)
     } else {
       const service = await import('./comfyui.service')
       const operation = task.operation === 'image' ? service.generateImageWithComfyUI(request as GenerateImageRequest)

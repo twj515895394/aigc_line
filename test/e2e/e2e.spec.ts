@@ -603,7 +603,7 @@ test.describe('AIGC CANVAS Electron UI', () => {
     await expect(page.getByRole('heading', { name: 'Agent 环境' })).toHaveCount(0)
     await expect(page.getByText('ANTHROPIC_AUTH_TOKEN')).toHaveCount(0)
     const qwenBox = await page.getByRole('heading', { name: 'Qwen 音视频审查' }).boundingBox()
-    const googleBox = await page.getByRole('heading', { name: 'Google AI 图片生成' }).boundingBox()
+    const googleBox = await page.getByRole('heading', { name: 'Gemini 反代' }).boundingBox()
     const seedreamBox = await page.getByRole('heading', { name: '方舟图片 / 视频生成' }).boundingBox()
     expect(comfyBox).not.toBeNull()
     expect(qwenBox).not.toBeNull()

@@ -24,6 +24,9 @@ import type {
   TestQwenConnectionRequest,
   TestGoogleAiConnectionRequest,
   TestSeedreamConnectionRequest,
+  ListReverseProxyModelsRequest,
+  ListReverseProxyModelsResult,
+  TestReverseProxyConnectionRequest,
   ConnectionTestResult,
   ImportAudioResult,
   ImportProjectMediaResult,
@@ -93,6 +96,10 @@ export interface ElectronAPI {
   testQwenConnection: (request: TestQwenConnectionRequest) => Promise<ConnectionTestResult>;
   testGoogleAiConnection: (request: TestGoogleAiConnectionRequest) => Promise<ConnectionTestResult>;
   testSeedreamConnection: (request: TestSeedreamConnectionRequest) => Promise<ConnectionTestResult>;
+  listGeminiModels: (request: ListReverseProxyModelsRequest) => Promise<ListReverseProxyModelsResult>;
+  testGeminiConnection: (request: TestReverseProxyConnectionRequest) => Promise<ConnectionTestResult>;
+  listGptGrokModels: (request: ListReverseProxyModelsRequest) => Promise<ListReverseProxyModelsResult>;
+  testGptGrokConnection: (request: TestReverseProxyConnectionRequest) => Promise<ConnectionTestResult>;
   onChatMessage: (callback: (event: ProjectChatMessagePush) => void) => () => void;
   onArtifact: (callback: (event: ProjectArtifactPush) => void) => () => void;
   onTurnEnd: (callback: (event: ProjectTurnEndPush) => void) => () => void;
@@ -159,6 +166,10 @@ const api: ElectronAPI = {
   testQwenConnection: (request) => invoke(IPC_CHANNELS.settings.testQwen, request),
   testGoogleAiConnection: (request) => invoke(IPC_CHANNELS.settings.testGoogleAi, request),
   testSeedreamConnection: (request) => invoke(IPC_CHANNELS.settings.testSeedream, request),
+  listGeminiModels: (request) => invoke(IPC_CHANNELS.settings.listGeminiModels, request),
+  testGeminiConnection: (request) => invoke(IPC_CHANNELS.settings.testGemini, request),
+  listGptGrokModels: (request) => invoke(IPC_CHANNELS.settings.listGptGrokModels, request),
+  testGptGrokConnection: (request) => invoke(IPC_CHANNELS.settings.testGptGrok, request),
   onChatMessage: (callback) => onPush(IPC_CHANNELS.push.chatMessage, callback),
   onArtifact: (callback) => onPush(IPC_CHANNELS.push.artifact, callback),
   onTurnEnd: (callback) => onPush(IPC_CHANNELS.push.turnEnd, callback),

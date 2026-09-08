@@ -17,3 +17,8 @@ export function listCachedComfyWorkflows(forceRefresh = false): Promise<ComfyWor
   return pendingWorkflows
 }
 
+export function clearCachedComfyWorkflows(): void {
+  cachedWorkflows = null
+  pendingWorkflows = null
+}
+

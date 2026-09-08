@@ -8,7 +8,7 @@ import { messageHub } from '../message-hub';
 import { appendChatMessage } from '../project.store';
 import { pushArtifact } from './artifact';
 import { sendCanvasCommand } from './canvas-bridge';
-import { analyzeVideoWithQwen } from '../qwen-video-analysis.service';
+import { analyzeVideo } from '../analyze-video.service';
 import { directorProjectSchema } from '../../../../src/shared/director-schema';
 
 /** Image extensions -> MIME types supported as image artifacts */
@@ -143,7 +143,7 @@ export function createCanvasTools(projectId: string, folderPath: string) {
       ),
       tool(
         'AnalyzeVideo',
-        'Analyze any video with qwen3.5-omni-plus according to a free-form requirement. videoUrl may be a project-relative/absolute file path inside the current project or a public http(s) URL. The tool scans the whole video in chronological order, jointly analyzes visuals, visible text, speech, music, ambience and sound effects, distinguishes observations/transcription/inference, cites timestamped evidence, states uncertainty, and saves a Chinese Markdown report under generated/analyses/. Suitable for summaries, timelines, transcription, content extraction, event counting, comparisons, audiovisual analysis and targeted quality inspection.',
+        'Analyze any video with the audiovisual model configured in Settings (Qwen Omni or Gemini reverse-proxy analysis model). videoUrl may be a project-relative/absolute file path inside the current project or a public http(s) URL. The tool scans the whole video in chronological order, jointly analyzes visuals, visible text, speech, music, ambience and sound effects, distinguishes observations/transcription/inference, cites timestamped evidence, states uncertainty, and saves a Chinese Markdown report under generated/analyses/. Suitable for summaries, timelines, transcription, inverse video prompts, content extraction, event counting, comparisons, audiovisual analysis and targeted quality inspection.',
         {
           videoUrl: z.string().min(1).describe('Project-local video path or public http(s) video URL'),
           analysisRequest: z.string().min(1).describe('What to inspect, extract, compare, summarize, transcribe, or evaluate'),
@@ -151,7 +151,7 @@ export function createCanvasTools(projectId: string, folderPath: string) {
         async (args) => {
           log.info('[AnalyzeVideo] Analyzing:', args.videoUrl);
           try {
-            const result = await analyzeVideoWithQwen(folderPath, args.videoUrl, args.analysisRequest);
+            const result = await analyzeVideo(folderPath, args.videoUrl, args.analysisRequest);
             return {
               content: [{ type: 'text', text: `${result.analysisText}\n\n---\n分析报告已保存：${result.reportPath}` }],
             } as any;

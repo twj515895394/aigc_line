@@ -20,6 +20,9 @@ import {
 import { generateImageWithGoogle, isGoogleImageWorkflow } from '../services/google-image.service'
 import { generateImageWithSeedream, isSeedreamImageWorkflow } from '../services/seedream-image.service'
 import { generateVideoWithSeedance, isSeedanceVideoWorkflow } from '../services/seedance-video.service'
+import { generateImageWithGeminiProxy } from '../services/gemini-proxy.service'
+import { generateImageWithGptGrok, generateVideoWithGptGrok } from '../services/gpt-grok-proxy.service'
+import { isGeminiProxyImageWorkflow, isGptGrokImageWorkflow, isGptGrokVideoWorkflow } from '../../../src/shared/reverse-proxy-workflows'
 import { getRuntimeSettings } from '../services/settings.service'
 import { acknowledgeGenerationTaskResult, dismissGenerationTask, listProjectGenerationTasks } from '../services/generation-task.service'
 
@@ -43,6 +46,8 @@ export function registerComfyUIHandlers(): void {
         const resolvedRequest = { ...request, workflowId }
         if (isGoogleImageWorkflow(workflowId)) return await generateImageWithGoogle(resolvedRequest)
         if (isSeedreamImageWorkflow(workflowId)) return await generateImageWithSeedream(resolvedRequest)
+        if (isGeminiProxyImageWorkflow(workflowId)) return await generateImageWithGeminiProxy(resolvedRequest)
+        if (isGptGrokImageWorkflow(workflowId)) return await generateImageWithGptGrok(resolvedRequest)
         return await generateImageWithComfyUI(resolvedRequest)
       } catch (error) {
         return {
@@ -57,6 +62,7 @@ export function registerComfyUIHandlers(): void {
     async (_event, request: GenerateVideoRequest): Promise<GenerateVideoResult> => {
       try {
         if (isSeedanceVideoWorkflow(request.workflowId)) return await generateVideoWithSeedance(request)
+        if (isGptGrokVideoWorkflow(request.workflowId)) return await generateVideoWithGptGrok(request)
         return await generateVideoWithComfyUI(request)
       } catch (error) {
         return {

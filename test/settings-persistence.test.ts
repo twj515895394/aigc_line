@@ -62,4 +62,80 @@ describe('settings secret persistence', () => {
     expect(normalizeSeedreamBaseUrl('https://ark.cn-beijing.volces.com/api/plan/v3/images/generations/images/generations'))
       .toBe('https://ark.cn-beijing.volces.com/api/plan/v3')
   })
+
+  it('persists Gemini reverse-proxy settings and can clear the encrypted key', async () => {
+    const request = {
+      comfyuiBaseUrl: 'http://127.0.0.1:8188',
+      agentBaseUrl: '',
+      qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      defaultImageWorkflowId: 'krea2-turbo-t2i',
+      googleAiProxyUrl: '',
+      seedreamBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      videoAnalysisProvider: 'gemini' as const,
+      geminiBaseUrl: 'http://127.0.0.1:8045',
+      geminiApiKey: 'gemini-secret',
+      geminiAnalysisModelId: 'gemini-3.7-flash-medium',
+      geminiEnabledImageModelIds: ['gemini-3.1-flash-image'],
+    }
+
+    const saved = await saveAppSettings(request)
+    expect(saved.videoAnalysisProvider).toBe('gemini')
+    expect(saved.geminiBaseUrl).toBe('http://127.0.0.1:8045/v1')
+    expect(saved.geminiApiKeyConfigured).toBe(true)
+    expect(saved.geminiApiKey).toBe('gemini-secret')
+    expect(saved.geminiAnalysisModelId).toBe('gemini-3.7-flash-medium')
+    expect(saved.geminiEnabledImageModelIds).toEqual(['gemini-3.1-flash-image'])
+
+    const stored = await fs.readFile(path.join(fixture.directory, 'settings.json'), 'utf8')
+    expect(stored).toContain('encryptedGeminiApiKey')
+    expect(stored).not.toContain('gemini-secret')
+
+    const cleared = await saveAppSettings({
+      ...request,
+      geminiApiKey: undefined,
+      clearGeminiApiKey: true,
+    })
+    expect(cleared.geminiApiKeyConfigured).toBe(false)
+    expect(cleared.geminiEnabledImageModelIds).toEqual(['gemini-3.1-flash-image'])
+  })
+
+  it('persists GPT/Grok reverse-proxy settings without overwriting Gemini fields', async () => {
+    await saveAppSettings({
+      comfyuiBaseUrl: 'http://127.0.0.1:8188',
+      agentBaseUrl: '',
+      qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      defaultImageWorkflowId: 'krea2-turbo-t2i',
+      googleAiProxyUrl: '',
+      seedreamBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      geminiBaseUrl: 'http://127.0.0.1:8045/v1',
+      geminiApiKey: 'gemini-keep',
+      geminiEnabledImageModelIds: ['gemini-3.1-flash-image'],
+    })
+
+    const saved = await saveAppSettings({
+      comfyuiBaseUrl: 'http://127.0.0.1:8188',
+      agentBaseUrl: '',
+      qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      defaultImageWorkflowId: 'krea2-turbo-t2i',
+      googleAiProxyUrl: '',
+      seedreamBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+      gptGrokBaseUrl: 'http://127.0.0.1:8317',
+      gptGrokApiKey: 'twj-secret',
+      gptGrokEnabledImageModelIds: ['gpt-image-2'],
+      gptGrokEnabledVideoModelIds: ['grok-imagine-video'],
+    })
+
+    expect(saved.gptGrokBaseUrl).toBe('http://127.0.0.1:8317/v1')
+    expect(saved.gptGrokApiKeyConfigured).toBe(true)
+    expect(saved.gptGrokApiKey).toBe('twj-secret')
+    expect(saved.gptGrokEnabledImageModelIds).toEqual(['gpt-image-2'])
+    expect(saved.gptGrokEnabledVideoModelIds).toEqual(['grok-imagine-video'])
+    expect(saved.geminiBaseUrl).toBe('http://127.0.0.1:8045/v1')
+    expect(saved.geminiApiKey).toBe('gemini-keep')
+    expect(saved.geminiEnabledImageModelIds).toEqual(['gemini-3.1-flash-image'])
+
+    const stored = await fs.readFile(path.join(fixture.directory, 'settings.json'), 'utf8')
+    expect(stored).toContain('encryptedGptGrokApiKey')
+    expect(stored).not.toContain('twj-secret')
+  })
 })

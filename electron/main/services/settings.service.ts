@@ -8,9 +8,11 @@ import type {
   TestGoogleAiConnectionRequest,
   TestQwenConnectionRequest,
   TestSeedreamConnectionRequest,
+  VideoAnalysisProvider,
 } from '../../../src/shared/ipc.types'
 import { getAppDataDir } from './project.store'
 import { fetchGoogleApi, normalizeGoogleProxyUrl } from './google-network.service'
+import { normalizeOpenAiCompatibleBaseUrl } from '../../../src/shared/reverse-proxy-url'
 
 interface StoredSettings {
   comfyuiBaseUrl?: string
@@ -25,6 +27,15 @@ interface StoredSettings {
   /** Legacy field retained only for migration from earlier development builds. */
   encryptedSeedreamApiKey?: string
   defaultImageWorkflowId?: string
+  videoAnalysisProvider?: VideoAnalysisProvider
+  geminiBaseUrl?: string
+  encryptedGeminiApiKey?: string
+  geminiAnalysisModelId?: string
+  geminiEnabledImageModelIds?: string[]
+  gptGrokBaseUrl?: string
+  encryptedGptGrokApiKey?: string
+  gptGrokEnabledImageModelIds?: string[]
+  gptGrokEnabledVideoModelIds?: string[]
 }
 
 export interface RuntimeSettings {
@@ -38,6 +49,15 @@ export interface RuntimeSettings {
   seedreamBaseUrl: string
   seedreamApiKey: string
   defaultImageWorkflowId: string
+  videoAnalysisProvider: VideoAnalysisProvider
+  geminiBaseUrl: string
+  geminiApiKey: string
+  geminiAnalysisModelId: string
+  geminiEnabledImageModelIds: string[]
+  gptGrokBaseUrl: string
+  gptGrokApiKey: string
+  gptGrokEnabledImageModelIds: string[]
+  gptGrokEnabledVideoModelIds: string[]
 }
 
 const SETTINGS_FILE = 'settings.json'
@@ -47,6 +67,8 @@ const REMOVED_IMAGE_WORKFLOWS = new Set(['flux2-klein-9b-t2i', 'flux2-klein-9b-e
 const DEFAULT_QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 export const DEFAULT_SEEDREAM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
 export const QWEN_OMNI_MODEL = 'qwen3.5-omni-plus'
+const DEFAULT_VIDEO_ANALYSIS_PROVIDER: VideoAnalysisProvider = 'qwen'
+
 
 const settingsPath = (): string => path.join(getAppDataDir(), SETTINGS_FILE)
 
@@ -59,6 +81,20 @@ export const normalizeSeedreamBaseUrl = (value: string): string => (
 const normalizeDefaultWorkflow = (value?: string): string => (
   !value || REMOVED_IMAGE_WORKFLOWS.has(value) ? DEFAULT_WORKFLOW : value
 )
+function normalizeOptionalProxyBaseUrl(value?: string): string {
+  const trimmed = value?.trim() || ''
+  if (!trimmed) return ''
+  return normalizeOpenAiCompatibleBaseUrl(trimmed)
+}
+function normalizeVideoAnalysisProvider(value?: string): VideoAnalysisProvider {
+  return value === 'gemini' ? 'gemini' : DEFAULT_VIDEO_ANALYSIS_PROVIDER
+}
+
+function normalizeStringList(value?: string[]): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string' && item.trim() !== '').map((item) => item.trim())
+}
+
 
 async function readStoredSettings(): Promise<StoredSettings> {
   try {
@@ -116,6 +152,15 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
       || process.env.ARK_API_KEY
       || '',
     defaultImageWorkflowId: normalizeDefaultWorkflow(stored.defaultImageWorkflowId),
+    videoAnalysisProvider: normalizeVideoAnalysisProvider(stored.videoAnalysisProvider),
+    geminiBaseUrl: stored.geminiBaseUrl?.trim() || '',
+    geminiApiKey: decryptToken(stored.encryptedGeminiApiKey),
+    geminiAnalysisModelId: stored.geminiAnalysisModelId?.trim() || '',
+    geminiEnabledImageModelIds: normalizeStringList(stored.geminiEnabledImageModelIds),
+    gptGrokBaseUrl: stored.gptGrokBaseUrl?.trim() || '',
+    gptGrokApiKey: decryptToken(stored.encryptedGptGrokApiKey),
+    gptGrokEnabledImageModelIds: normalizeStringList(stored.gptGrokEnabledImageModelIds),
+    gptGrokEnabledVideoModelIds: normalizeStringList(stored.gptGrokEnabledVideoModelIds),
   }
 }
 
@@ -135,6 +180,17 @@ export async function getAppSettingsView(): Promise<AppSettingsView> {
     seedreamApiKey: runtime.seedreamApiKey,
     seedreamApiKeyConfigured: !!runtime.seedreamApiKey,
     defaultImageWorkflowId: runtime.defaultImageWorkflowId,
+    videoAnalysisProvider: runtime.videoAnalysisProvider,
+    geminiBaseUrl: runtime.geminiBaseUrl,
+    geminiApiKey: runtime.geminiApiKey,
+    geminiApiKeyConfigured: !!runtime.geminiApiKey,
+    geminiAnalysisModelId: runtime.geminiAnalysisModelId,
+    geminiEnabledImageModelIds: runtime.geminiEnabledImageModelIds,
+    gptGrokBaseUrl: runtime.gptGrokBaseUrl,
+    gptGrokApiKey: runtime.gptGrokApiKey,
+    gptGrokApiKeyConfigured: !!runtime.gptGrokApiKey,
+    gptGrokEnabledImageModelIds: runtime.gptGrokEnabledImageModelIds,
+    gptGrokEnabledVideoModelIds: runtime.gptGrokEnabledVideoModelIds,
   }
 }
 
@@ -148,6 +204,27 @@ export async function saveAppSettings(request: SaveAppSettingsRequest): Promise<
     googleAiProxyUrl: normalizeGoogleProxyUrl(request.googleAiProxyUrl || ''),
     seedreamBaseUrl: normalizeSeedreamBaseUrl(request.seedreamBaseUrl || DEFAULT_SEEDREAM_BASE_URL),
     defaultImageWorkflowId: normalizeDefaultWorkflow(request.defaultImageWorkflowId),
+    videoAnalysisProvider: request.videoAnalysisProvider === undefined
+      ? current.videoAnalysisProvider
+      : normalizeVideoAnalysisProvider(request.videoAnalysisProvider),
+    geminiBaseUrl: request.geminiBaseUrl === undefined
+      ? current.geminiBaseUrl
+      : normalizeOptionalProxyBaseUrl(request.geminiBaseUrl),
+    geminiAnalysisModelId: request.geminiAnalysisModelId === undefined
+      ? current.geminiAnalysisModelId
+      : request.geminiAnalysisModelId.trim(),
+    geminiEnabledImageModelIds: request.geminiEnabledImageModelIds === undefined
+      ? current.geminiEnabledImageModelIds
+      : normalizeStringList(request.geminiEnabledImageModelIds),
+    gptGrokBaseUrl: request.gptGrokBaseUrl === undefined
+      ? current.gptGrokBaseUrl
+      : normalizeOptionalProxyBaseUrl(request.gptGrokBaseUrl),
+    gptGrokEnabledImageModelIds: request.gptGrokEnabledImageModelIds === undefined
+      ? current.gptGrokEnabledImageModelIds
+      : normalizeStringList(request.gptGrokEnabledImageModelIds),
+    gptGrokEnabledVideoModelIds: request.gptGrokEnabledVideoModelIds === undefined
+      ? current.gptGrokEnabledVideoModelIds
+      : normalizeStringList(request.gptGrokEnabledVideoModelIds),
   }
   delete (next as StoredSettings & { qwenModel?: string }).qwenModel
   if (request.clearAgentToken) {
@@ -172,6 +249,16 @@ export async function saveAppSettings(request: SaveAppSettingsRequest): Promise<
     next.seedreamApiKey = request.seedreamApiKey.trim()
     delete next.encryptedSeedreamApiKey
   }
+  if (request.clearGeminiApiKey) {
+    delete next.encryptedGeminiApiKey
+  } else if (request.geminiApiKey?.trim()) {
+    next.encryptedGeminiApiKey = encryptToken(request.geminiApiKey.trim(), 'Gemini API Key')
+  }
+  if (request.clearGptGrokApiKey) {
+    delete next.encryptedGptGrokApiKey
+  } else if (request.gptGrokApiKey?.trim()) {
+    next.encryptedGptGrokApiKey = encryptToken(request.gptGrokApiKey.trim(), 'GPT / Grok API Key')
+  }
   await writeStoredSettings(next)
   const persisted = await readStoredSettings()
   if (persisted.qwenBaseUrl !== next.qwenBaseUrl) {
@@ -183,6 +270,12 @@ export async function saveAppSettings(request: SaveAppSettingsRequest): Promise<
   if (persisted.seedreamBaseUrl !== next.seedreamBaseUrl) {
     throw new Error('Seedream API 地址写入后校验失败，请重试')
   }
+  if ((persisted.geminiBaseUrl || '') !== (next.geminiBaseUrl || '')) {
+    throw new Error('Gemini 反代地址写入后校验失败，请重试')
+  }
+  if ((persisted.gptGrokBaseUrl || '') !== (next.gptGrokBaseUrl || '')) {
+    throw new Error('GPT / Grok 反代地址写入后校验失败，请重试')
+  }
   if (request.qwenApiKey?.trim() && !persisted.encryptedQwenApiKey) {
     throw new Error('Qwen API Key 写入后校验失败，请重试')
   }
@@ -191,6 +284,12 @@ export async function saveAppSettings(request: SaveAppSettingsRequest): Promise<
   }
   if (request.seedreamApiKey?.trim() && persisted.seedreamApiKey !== request.seedreamApiKey.trim()) {
     throw new Error('Seedream API Key 写入后校验失败，请重试')
+  }
+  if (request.geminiApiKey?.trim() && !persisted.encryptedGeminiApiKey) {
+    throw new Error('Gemini API Key 写入后校验失败，请重试')
+  }
+  if (request.gptGrokApiKey?.trim() && !persisted.encryptedGptGrokApiKey) {
+    throw new Error('GPT / Grok API Key 写入后校验失败，请重试')
   }
   const view = await getAppSettingsView()
   if (request.qwenApiKey?.trim() && !view.qwenApiKeyConfigured) {
@@ -201,6 +300,12 @@ export async function saveAppSettings(request: SaveAppSettingsRequest): Promise<
   }
   if (request.seedreamApiKey?.trim() && !view.seedreamApiKeyConfigured) {
     throw new Error('Seedream API Key 已写入但无法从系统安全存储解密，请检查系统凭据服务')
+  }
+  if (request.geminiApiKey?.trim() && !view.geminiApiKeyConfigured) {
+    throw new Error('Gemini API Key 已写入但无法从系统安全存储解密，请检查系统凭据服务')
+  }
+  if (request.gptGrokApiKey?.trim() && !view.gptGrokApiKeyConfigured) {
+    throw new Error('GPT / Grok API Key 已写入但无法从系统安全存储解密，请检查系统凭据服务')
   }
   return view
 }
