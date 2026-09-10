@@ -1,9 +1,8 @@
 import { normalizeVideoDuration } from '../shared/video-duration'
-import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
+import { IMAGE_ASPECT_RATIOS, VIDEO_ASPECT_RATIOS } from '../shared/media-dimensions'
+import { createContext, lazy, memo, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react'
 import {
   addEdge,
-  Background,
-  BackgroundVariant,
   ConnectionLineType,
   Controls,
   Handle,
@@ -16,7 +15,7 @@ import {
   useEdgesState,
   useEdges,
   useNodesState,
-  useNodes,
+  useStore,
   useReactFlow,
   type Connection,
   type Edge,
@@ -24,10 +23,11 @@ import {
   type NodeChange,
   type NodeProps,
   type Viewport,
+  type ReactFlowState,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useAppStore } from '../stores/app.store'
-import { listCachedComfyWorkflows } from '../shared/comfy-workflows'
+import { listCachedComfyWorkflows, peekCachedComfyWorkflows } from '../shared/comfy-workflows'
 import type {
   CanvasCommandRequest,
   CanvasCommandResponse,
@@ -54,8 +54,16 @@ import { projectSnapshotWriter } from '../shared/snapshot-persistence'
 import { registerEditFlusher } from '../shared/pending-edits'
 import { EditHistory } from '../shared/edit-history'
 import { vacantNodePosition } from '../shared/canvas-placement'
+import { retainCanvasNodeContent } from '../shared/canvas-node-content'
 import { ProjectAssetPreview } from './ProjectAssetPreview'
+import { CanvasImagePreview, CanvasVideoPreview } from './CanvasMediaPreview'
+import { CanvasBackground } from './CanvasBackground'
+import { CanvasEdge } from './CanvasEdge'
+import { beginCanvasInteraction, endCanvasInteraction, resetCanvasInteraction } from './canvas-interaction'
 import { orderImageReferences } from '../shared/image-references'
+import { pickDefaultWorkflowId } from '../shared/default-workflows'
+import { runGenerationFallbackChain, workflowFallbackChain } from '../shared/generation-fallback'
+import { blockedUpstreamGenerationMessage } from '../shared/generation-gate'
 import type { DirectorActorModelId, DirectorAspectRatio, DirectorBodyType, DirectorPoseId, DirectorProject, DirectorShot, DirectorVec3 } from '../shared/director.types'
 import { directorElementKindSchema, directorProjectSchema, directorSceneDraftSchema } from '../shared/director-schema'
 import { DIRECTOR_PRIMITIVE_KINDS } from '../shared/director-element-catalog'
@@ -73,6 +81,8 @@ import {
   upsertDirectorCameraKeyframe,
   validateDirectorProject,
 } from '../features/director/director-model'
+import { applyDirectorReviewAutoFixes, directorReviewPassed, reviewDirectorProject } from '../features/director/director-scene-review'
+import type { DirectorStageRequest } from '../features/director/DirectorStageDialog'
 import './canvas-capabilities'
 
 const DirectorStageDialog = lazy(() => import('../features/director/DirectorStageDialog').then((module) => ({
@@ -92,6 +102,10 @@ type StoryEdge = Edge<Record<string, never>, 'default'>
 const ReferenceIndexContext = createContext<CanvasReferenceIndex<StoryNode> | null>(null)
 const PersistNodeContext = createContext<(nodeId: string, patch: Partial<StoryNodeData>) => Promise<void>>(async () => { throw new Error('画布尚未准备好') })
 const RecoverTasksContext = createContext<() => Promise<void>>(async () => {})
+const DirectorStageContext = createContext<{ open: (nodeId: string) => void; activeNodeId: string | null }>({
+  open: () => undefined,
+  activeNodeId: null,
+})
 const runtimeNodeFields = new Set(['sourcePath', 'sourceHistory', 'preview', 'generationStatus', 'generationError', 'boardPreviewPath', 'boardPreviewUpdatedAt'])
 const editDataKeys = new WeakMap<StoryNodeData, string>()
 function canvasEditKey(value: FlowSnapshot): string {
@@ -419,8 +433,14 @@ function EmptyPreview({ kind }: { kind: 'image' | 'video' }) {
   )
 }
 
+const selectNodeContent = (state: ReactFlowState) => state.nodes as StoryNode[]
+const equalNodeContent = (previous: StoryNode[], next: StoryNode[]) => retainCanvasNodeContent(previous, next) === previous
+const beginNodeInteraction = () => beginCanvasInteraction('nodes')
+const endNodeInteraction = () => endCanvasInteraction('nodes')
+const beginViewportInteraction = () => beginCanvasInteraction('viewport')
+
 function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
-  const nodes = useNodes<StoryNode>()
+  const nodes = useStore(selectNodeContent, equalNodeContent)
   const edges = useEdges<StoryEdge>()
   const { setNodes, deleteElements } = useReactFlow<StoryNode, StoryEdge>()
   const currentProject = useAppStore((state) => state.currentProject)
@@ -443,8 +463,9 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
   const isCloudImageWorkflow = isGoogleImageWorkflow || isSeedreamImageWorkflow
   const imageReferenceLimit = isGoogleImageWorkflow ? 14 : isSeedreamImageWorkflow ? 10 : 0
   const isSeedanceWorkflow = selectedWorkflow?.id.startsWith('seedance-') ?? false
-  const isReferenceWorkflow = (selectedWorkflow?.id.startsWith('minimax-h3-r2v') ?? false) || isSeedanceWorkflow
-  const isFirstLastWorkflow = kind === 'video' && selectedWorkflow?.id === 'minimax-h3-t2v-flf2v'
+  const isEasyH3Workflow = selectedWorkflow?.id === 'minimax-h3-easy' || selectedWorkflow?.id === 'minimax-h3-easy-2pass'
+  const isReferenceWorkflow = (selectedWorkflow?.id.startsWith('minimax-h3-r2v') ?? false) || isSeedanceWorkflow || isEasyH3Workflow
+  const isFirstLastWorkflow = kind === 'video' && (selectedWorkflow?.id === 'minimax-h3-t2v-flf2v' || isEasyH3Workflow)
   const incoming = edges
     .filter((edge) => edge.target === id)
     .map((edge) => ({ edge, source: nodes.find((node) => node.id === edge.source) }))
@@ -566,7 +587,7 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
                   >
                     <span className="min-w-0 flex-1 truncate">{workflow.name}</span>
                     <span className="flex-shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[8px] text-white/35">
-                      {workflow.id.startsWith('google-') ? 'Google · 多图' : workflow.id.startsWith('seedream-') ? '方舟 · 多图' : workflow.id.startsWith('seedance-') ? '方舟 · 全模态' : workflow.id.startsWith('minimax-h3-r2v') ? (workflow.id.endsWith('-turbo') ? '全模态 · 加速' : '全模态') : workflow.kind === 'image-to-video' ? '视频' : workflow.kind === 'image-to-image' ? '图生图' : 'ComfyUI · 文生图'}
+                      {workflow.id.startsWith('google-') ? 'Google · 多图' : workflow.id.startsWith('seedream-') ? '方舟 · 多图' : workflow.id.startsWith('seedance-') ? '方舟 · 全模态' : workflow.id === 'minimax-h3-easy' ? '一采 · 文生/图生/参考' : workflow.id === 'minimax-h3-easy-2pass' ? '二采 · 高质量更慢' : workflow.id.startsWith('minimax-h3-r2v') ? (workflow.id.endsWith('-turbo') ? '全模态 · 加速' : '全模态') : workflow.kind === 'image-to-video' ? '视频' : workflow.kind === 'image-to-image' ? '图生图' : 'ComfyUI · 文生图'}
                     </span>
                   </button>
                 ))}
@@ -850,11 +871,13 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
         }}
         placeholder={kind === 'image'
           ? '描述你想要生成的画面内容，连接其他节点可引用素材…'
-          : isReferenceWorkflow
-            ? isSeedanceWorkflow
-              ? '描述视频并用“图片1”“视频1”“音频1”指定参考素材；无参考素材时也可文生视频…'
-              : '描述视频并用 <Picture 1>、<Video 1>、<Audio 1> 指定参考素材…'
-            : '描述视频的运动、镜头和节奏，连接图片节点可作为首尾帧参考…'}
+          : isEasyH3Workflow
+            ? '描述视频。无参考=文生；拖入首尾帧=图生；拖入图片/视频/音频轨=全模态参考…'
+            : isReferenceWorkflow
+              ? isSeedanceWorkflow
+                ? '描述视频并用“图片1”“视频1”“音频1”指定参考素材；无参考素材时也可文生视频…'
+                : '描述视频并用 <Picture 1>、<Video 1>、<Audio 1> 指定参考素材…'
+              : '描述视频的运动、镜头和节奏，连接图片节点可作为首尾帧参考…'}
         className="min-h-[140px] w-full resize-none border-0 bg-transparent px-1 text-[12px] leading-5 text-[#e8e6df] outline-none placeholder:text-white/25"
       />
 
@@ -879,7 +902,7 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
             </button>
             {ratioMenuOpen && (
               <div className="absolute bottom-full left-0 z-[100] mb-1.5 min-w-[76px] overflow-hidden rounded-xl border border-white/[0.12] bg-[#242429] p-1 shadow-[0_12px_32px_rgba(0,0,0,0.65)]">
-                {(['16:9', '9:16', '1:1', '4:3'] as const).map((ratio) => (
+                {(kind === 'video' ? VIDEO_ASPECT_RATIOS : IMAGE_ASPECT_RATIOS).map((ratio) => (
                   <button
                     key={ratio}
                     onClick={() => {
@@ -961,7 +984,7 @@ const UPSCALE_QUALITY_LABELS: Record<(typeof UPSCALE_QUALITIES)[number], string>
 }
 
 function UpscalePanel({ id }: { id: string }) {
-  const nodes = useNodes<StoryNode>()
+  const nodes = useStore(selectNodeContent, equalNodeContent)
   const edges = useEdges<StoryEdge>()
   const { setNodes, deleteElements } = useReactFlow<StoryNode, StoryEdge>()
   const [scaleMenuOpen, setScaleMenuOpen] = useState(false)
@@ -1136,7 +1159,7 @@ function NodeDeleteButton({ id }: { id: string }) {
   )
 }
 
-function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
+const StoryNodeCard = memo(function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
   const references = useContext(ReferenceIndexContext)!
   const referenceId = data.kind === 'director' || data.kind === 'image-editor' ? id : ''
   const subscribeReferences = useCallback((listener: () => void) => references.subscribe(referenceId, listener), [references, referenceId])
@@ -1144,16 +1167,14 @@ function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
   const imageEditorInputs = useSyncExternalStore(subscribeReferences, readReferences)
   const persistNode = useContext(PersistNodeContext)
   const recoverTasks = useContext(RecoverTasksContext)
+  const directorStage = useContext(DirectorStageContext)
   const { getNodes, getEdges, setNodes, setEdges } = useReactFlow<StoryNode, StoryEdge>()
   const currentProject = useAppStore((state) => state.currentProject)
   const addCanvasNodeReference = useAppStore((state) => state.addCanvasNodeReference)
-  const sendScopedAgentMessage = useAppStore((state) => state.sendScopedAgentMessage)
-  const directorAgentBusy = useAppStore((state) => data.kind === 'director' && !!state.currentProject && state.agentThinkingByProject[state.currentProject.id] === true)
   const isReferencedInChat = useAppStore((state) => state.referencedCanvasNodes.some((ref) => ref.id === id))
   const [audioImporting, setAudioImporting] = useState(false)
   const [videoAudioExtracting, setVideoAudioExtracting] = useState(false)
   const [videoAudioExtractionError, setVideoAudioExtractionError] = useState('')
-  const [directorOpen, setDirectorOpen] = useState(false)
   const [imageEditorOpen, setImageEditorOpen] = useState(false)
   const [boardPreviewFailed, setBoardPreviewFailed] = useState(false)
   const isUpscale = data.kind === 'upscale'
@@ -1164,20 +1185,11 @@ function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
     : isUpscale ? 'video' : null
   const isAudio = data.kind === 'audio'
   const aspectRatio = data.aspectRatio ?? '16:9'
-  const aspectRatioValue = aspectRatio === '1:1' ? '1 / 1' : aspectRatio === '4:3' ? '4 / 3' : aspectRatio === '9:16' ? '9 / 16' : '16 / 9'
+  const aspectRatioValue = aspectRatio === '1:1' ? '1 / 1' : aspectRatio === '4:3' ? '4 / 3' : aspectRatio === '3:4' ? '3 / 4' : aspectRatio === '9:16' ? '9 / 16' : '16 / 9'
   const directorProject = useMemo(
     () => isDirector ? normalizeDirectorProject(data.directorProject, data.title) : undefined,
     [data.directorProject, data.title, isDirector],
   )
-  const directorReferenceImages = useMemo(() => {
-    return imageEditorInputs
-      .map((node) => ({
-        nodeId: node.id,
-        title: node.data.title,
-        sourcePath: node.data.sourcePath!,
-        preview: node.data.preview ?? (currentProject ? workspacePreview(currentProject.id, node.data.sourcePath!) : undefined),
-      }))
-  }, [imageEditorInputs, currentProject])
   const selectedImageEditorInput = isImageEditor ? imageEditorInputs[0] : undefined
   const imageEditorSources = useMemo(() => currentProject ? imageEditorInputs.map((node) => ({
     nodeId: node.id,
@@ -1262,141 +1274,6 @@ function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
       : node))
   }
 
-  const updateDirectorProject = (directorProject: DirectorProject) => {
-    return persistNode(id, { directorProject })
-  }
-
-  const captureDirectorStill = async (
-    pngDataUrl: string,
-    shot: DirectorShot,
-    directorProject: DirectorProject,
-  ): Promise<string> => {
-    if (!currentProject) throw new Error('当前项目不可用')
-    const captureProjectId = currentProject.id
-    const assertCaptureContext = () => {
-      if (useAppStore.getState().currentProject?.id !== captureProjectId) {
-        throw new Error('项目已切换，已取消写回本次导演台截图')
-      }
-      if (!getNodes().some((node) => node.id === id && node.data.kind === 'director')) {
-        throw new Error('导演台节点已不存在，已取消写回截图')
-      }
-    }
-    const pngData = await fetch(pngDataUrl).then((response) => response.arrayBuffer())
-    assertCaptureContext()
-    const result = await window.electronAPI.saveDirectorStill({
-      projectId: captureProjectId,
-      nodeId: id,
-      shotId: shot.id,
-      shotName: shot.name,
-      pngData,
-    })
-    if (!result.success || !result.relativePath) throw new Error(result.error || '导演台截图保存失败')
-    assertCaptureContext()
-
-    const relativePath = result.relativePath
-    const preview = workspacePreview(captureProjectId, relativePath)
-    const liveNodes = getNodes()
-    const sourceNode = liveNodes.find((node) => node.id === id)
-    if (!sourceNode) throw new Error('导演台节点已不存在，已取消写回截图')
-    const outputCount = liveNodes.filter((node) => node.data.kind === 'image' && node.data.sourcePath?.includes('generated/director-stills/')).length
-    const imageNode = makeNode('image', liveNodes.length + 1, {
-      x: (sourceNode?.position.x ?? 120) + 600 + outputCount * 680,
-      y: sourceNode?.position.y ?? 100,
-    })
-    imageNode.data = {
-      ...imageNode.data,
-      title: `${shot.name} · 构图参考`,
-      aspectRatio: shot.aspectRatio,
-      sourcePath: relativePath,
-      preview,
-      prompt: shot.notes ?? '',
-      readOnly: true,
-    }
-    setNodes((nodes) => [
-      ...nodes.map((node) => node.id === id
-        ? { ...node, data: { ...node.data, directorProject, sourcePath: relativePath, preview } }
-        : node),
-      imageNode,
-    ])
-    setEdges((edges) => [...edges, makeLinkedEdge(`edge-${id}-${imageNode.id}`, id, imageNode.id)])
-    return relativePath
-  }
-
-  const requestDirectorSceneFromAgent = async (
-    reference: { nodeId: string; title: string; sourcePath: string },
-    instruction: string,
-  ): Promise<void> => {
-    if (!currentProject) throw new Error('当前项目不可用')
-    const liveReference = getNodes().find((node) => node.id === reference.nodeId && node.data.kind === 'image')
-    if (!liveReference || liveReference.data.sourcePath !== reference.sourcePath) throw new Error('参考图片节点已变化，请重新选择')
-    const extra = instruction.trim() ? `\n补充要求：${instruction.trim()}` : ''
-    await sendScopedAgentMessage(
-      `请使用你的多模态能力读取所引用图片节点的 sourcePath，并分析图片内容；然后为所引用的 3D 导演台生成一个可编辑的简易白模空间。先调用 GetCanvasCapabilities 获取 director 的 apply-scene-draft 参数约束，再调用 InvokeNodeAction 将草案应用到导演台。只使用 ${DIRECTOR_PRIMITIVE_KINDS.join('、')}，最多 40 个素材；优先用专用类型表达地面、高台、楼梯、斜坡、门窗、桌椅、沙发、床、柜子和栏杆。每个素材必须正确声明 ground/elevated，地面、道路、建筑主体、围墙和落地家具必须 ground，窗框、屋顶、横梁、招牌等真实离地结构使用 elevated。注意 position 是底面锚点，scale 是完整宽/高/深（米），门窗框保留真实开口，不要在开口处叠加实心墙体。保留演员、手工元素、其他参考图生成的元素和全部机位。完成后用 GetCanvasNode 核对导演台工程，并确认全部 ground 元素的 position.y 都为 0。${extra}`,
-      [
-        { id, title: data.title, kind: 'director' },
-        { id: reference.nodeId, title: reference.title, kind: 'image' },
-      ],
-    )
-  }
-
-  const exportDirectorVideo = async (
-    webmData: ArrayBuffer,
-    shot: DirectorShot,
-    directorProject: DirectorProject,
-  ): Promise<string> => {
-    if (!currentProject) throw new Error('当前项目不可用')
-    const exportProjectId = currentProject.id
-    const assertExportContext = () => {
-      if (useAppStore.getState().currentProject?.id !== exportProjectId) {
-        throw new Error('项目已切换，已取消写回本次导演台预演视频')
-      }
-      if (!getNodes().some((node) => node.id === id && node.data.kind === 'director')) {
-        throw new Error('导演台节点已不存在，已取消写回预演视频')
-      }
-    }
-    assertExportContext()
-    const result = await window.electronAPI.saveDirectorVideo({
-      projectId: exportProjectId,
-      nodeId: id,
-      shotId: shot.id,
-      shotName: shot.name,
-      webmData,
-    })
-    if (!result.success || !result.relativePath) throw new Error(result.error || '导演台预演视频保存失败')
-    assertExportContext()
-
-    const relativePath = result.relativePath
-    const preview = workspacePreview(exportProjectId, relativePath)
-    const liveNodes = getNodes()
-    const sourceNode = liveNodes.find((node) => node.id === id)
-    if (!sourceNode) throw new Error('导演台节点已不存在，已取消写回预演视频')
-    const outputCount = liveNodes.filter((node) => (
-      node.data.sourcePath?.includes('generated/director-stills/')
-      || node.data.sourcePath?.includes('generated/director-videos/')
-    )).length
-    const videoNode = makeNode('video', liveNodes.length + 1, {
-      x: sourceNode.position.x + 600 + outputCount * 680,
-      y: sourceNode.position.y,
-    })
-    videoNode.data = {
-      ...videoNode.data,
-      title: `${shot.name} · 预演视频`,
-      aspectRatio: shot.aspectRatio,
-      duration: shot.durationSec,
-      sourcePath: relativePath,
-      preview,
-      prompt: shot.notes ?? '',
-      readOnly: true,
-    }
-    setNodes((nodes) => [
-      ...nodes.map((node) => node.id === id
-        ? { ...node, data: { ...node.data, directorProject } }
-        : node),
-      videoNode,
-    ])
-    setEdges((edges) => [...edges, makeLinkedEdge(`edge-${id}-${videoNode.id}`, id, videoNode.id)])
-    return relativePath
-  }
 
   const importAudio = async () => {
     if (!currentProject || audioImporting) return
@@ -1556,7 +1433,7 @@ function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
             </div>
           </div>
         ) : isDirector ? (
-          <div className="nodrag nowheel overflow-hidden rounded-[11px] bg-[#121318]" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="nodrag nowheel relative overflow-hidden rounded-[11px] bg-[#121318]" onPointerDown={(event) => event.stopPropagation()}>
             <div className="relative aspect-video overflow-hidden bg-[radial-gradient(circle_at_50%_30%,#273148_0%,#11141c_48%,#090a0e_100%)]">
               {data.preview ? (
                 <img src={data.preview} alt="导演台最近构图" className="h-full w-full object-contain" draggable={false} />
@@ -1574,37 +1451,22 @@ function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
             </div>
             <div className="flex items-center justify-between border-t border-white/8 px-4 py-3">
               <div><p className="text-[11px] text-white/65">3D Blocking 与机位预演</p><p className="mt-0.5 text-[9px] text-white/30">工程随画布保存，截图自动创建图片节点</p></div>
-              <button onClick={() => setDirectorOpen(true)} className="rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/10 px-4 py-2 text-[10px] font-medium text-[#f0d98c] hover:bg-[#d4af37]/15">打开导演台</button>
+              <button onClick={() => directorStage.open(id)} className="rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/10 px-4 py-2 text-[10px] font-medium text-[#f0d98c] hover:bg-[#d4af37]/15">{directorStage.activeNodeId === id ? '导演台已打开' : '打开导演台'}</button>
             </div>
+            {data.generationStatus === 'generating' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#101014]/75 text-[#e8c766] backdrop-blur-[2px]">
+                <span className="h-7 w-7 animate-spin rounded-full border-2 border-[#e8c766]/20 border-t-[#e8c766]" />
+                <span className="text-[11px] tracking-wider">导演台导出中</span>
+              </div>
+            )}
           </div>
         ) : visualMediaKind ? (
           <div className="relative overflow-hidden rounded-[11px] bg-[#202023] transition-[height] duration-200" style={{ aspectRatio: aspectRatioValue }}>
             {data.preview ? (
               data.kind === 'image' ? (
-                <img src={data.preview} alt={data.title} draggable={false} className="h-full w-full object-contain" />
+                <CanvasImagePreview url={data.preview} name={data.title} selected={selected} />
               ) : (
-                <video
-                  src={data.preview}
-                  className="nodrag nowheel h-full w-full cursor-auto object-contain"
-                  controls
-                  playsInline
-                  preload="metadata"
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
-                  onLoadedMetadata={() => {
-                    if (!data.generationError) return
-                    setNodes((nodes) => nodes.map((node) => node.id === id
-                      ? { ...node, data: { ...node.data, generationError: '' } }
-                      : node))
-                  }}
-                  onError={(event) => {
-                    const mediaError = event.currentTarget.error
-                    const detail = mediaError?.message || `媒体错误码 ${mediaError?.code ?? '未知'}`
-                    setNodes((nodes) => nodes.map((node) => node.id === id
-                      ? { ...node, data: { ...node.data, generationStatus: 'error', generationError: `视频加载失败：${detail}` } }
-                      : node))
-                  }}
-                />
+                <CanvasVideoPreview key={data.preview} url={data.preview} name={data.title} />
               )
             ) : (
               <EmptyPreview kind={visualMediaKind} />
@@ -1645,20 +1507,6 @@ function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
         <p className="mt-2 rounded-lg border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-[10px] text-rose-200">{videoAudioExtractionError}</p>
       )}
       {selected && isUpscale && <UpscalePanel id={id} />}
-      {directorOpen && isDirector && (
-        <Suspense fallback={<div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#090a0e] text-sm text-[#e8c766]">正在加载 3D 导演台…</div>}>
-          <DirectorStageDialog
-            project={directorProject ?? createDefaultDirectorProject(data.title)}
-            onChange={updateDirectorProject}
-            onCapture={captureDirectorStill}
-            onExportVideo={exportDirectorVideo}
-            referenceImages={directorReferenceImages}
-            agentBusy={directorAgentBusy}
-            onRequestAgentScene={requestDirectorSceneFromAgent}
-            onClose={() => setDirectorOpen(false)}
-          />
-        </Suspense>
-      )}
       {imageEditorOpen && isImageEditor && currentProject && (
         <Suspense fallback={<div className="fixed inset-0 z-[220] flex items-center justify-center bg-[#090a0e] text-sm text-[#e8c766]">正在加载画板…</div>}>
           <ImageEditorDialog
@@ -1675,9 +1523,10 @@ function StoryNodeCard({ id, data, selected }: NodeProps<StoryNode>) {
       )}
     </div>
   )
-}
+}, (previous, next) => previous.id === next.id && previous.data === next.data && previous.selected === next.selected)
 
 const nodeTypes = { storyNode: StoryNodeCard }
+const edgeTypes = { default: CanvasEdge }
 
 const makeNode = (kind: StoryNodeKind, index: number, position?: { x: number; y: number }): StoryNode => ({
   id: `${kind}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1689,6 +1538,11 @@ const makeNode = (kind: StoryNodeKind, index: number, position?: { x: number; y:
     ...(kind === 'image' || kind === 'video' ? { prompt: '' } : {}),
     aspectRatio: kind === 'image' || kind === 'image-editor' || kind === 'video' || kind === 'upscale' ? '16:9' : undefined,
     duration: kind === 'video' ? 5 : undefined,
+    workflowId: kind === 'image'
+      ? pickDefaultWorkflowId('text-to-image', peekCachedComfyWorkflows())
+      : kind === 'video'
+        ? pickDefaultWorkflowId('image-to-video', peekCachedComfyWorkflows())
+        : undefined,
     scale: kind === 'upscale' ? 2 : undefined,
     quality: kind === 'upscale' ? 'ULTRA' : undefined,
     directorProject: kind === 'director' ? createDefaultDirectorProject(`导演场景 ${index}`) : undefined,
@@ -1734,7 +1588,7 @@ const makeLinkedEdge = (
   target,
   sourceHandle,
   type: 'default',
-  animated: true,
+  animated: false,
   markerEnd: { type: MarkerType.ArrowClosed, color: '#8aa5c2', width: 14, height: 14 },
   style: { stroke: '#8aa5c2', strokeWidth: 1.5 },
 })
@@ -1745,6 +1599,9 @@ function CanvasFlow() {
   const artifacts = useAppStore((state) => state.artifacts)
   const folderPath = currentProject?.folderPath
   const [nodes, setNodes, onNodesChange] = useNodesState<StoryNode>([])
+  const contentNodesRef = useRef(nodes)
+  const contentNodes = retainCanvasNodeContent(contentNodesRef.current, nodes)
+  useLayoutEffect(() => { contentNodesRef.current = contentNodes }, [contentNodes])
   const [edges, setEdges, onEdgesChange] = useEdgesState<StoryEdge>([])
   const [dismissedArtifacts, setDismissedArtifacts] = useState<Record<string, number>>({})
   const dismissedArtifactsRef = useRef(dismissedArtifacts)
@@ -1782,6 +1639,21 @@ function CanvasFlow() {
     type: 'react-flow', version: 4, nodes: snapshotNodes, edges: edgesRef.current,
     viewport: getViewport(), dismissedArtifacts: dismissedArtifactsRef.current,
   }), [getViewport])
+  const endViewportInteraction = useCallback(() => {
+    endCanvasInteraction('viewport')
+    if (readyToSaveRef.current) writer.schedule(snapshot())
+  }, [snapshot, writer])
+  useEffect(() => {
+    window.addEventListener('pointerup', endNodeInteraction)
+    window.addEventListener('pointercancel', resetCanvasInteraction)
+    window.addEventListener('blur', resetCanvasInteraction)
+    return () => {
+      window.removeEventListener('pointerup', endNodeInteraction)
+      window.removeEventListener('pointercancel', resetCanvasInteraction)
+      window.removeEventListener('blur', resetCanvasInteraction)
+      resetCanvasInteraction()
+    }
+  }, [])
   const persistNode = useCallback(async (nodeId: string, patch: Partial<StoryNodeData>) => {
     if (!readyToSaveRef.current || loadedFolderRef.current !== folderPath) throw new Error('画布未成功加载，暂时不能保存')
     if (!nodesRef.current.some((node) => node.id === nodeId)) throw new Error('源节点已不存在')
@@ -1792,7 +1664,46 @@ function CanvasFlow() {
     await writer.flush()
   }, [folderPath, setNodes, snapshot, writer])
 
-  useLayoutEffect(() => { referenceIndex.update(nodes, edges) }, [referenceIndex, nodes, edges])
+  const sendScopedAgentMessage = useAppStore((state) => state.sendScopedAgentMessage)
+  const directorAgentBusy = useAppStore((state) => !!state.currentProject && state.agentThinkingByProject[state.currentProject.id] === true)
+  const directorRunningTool = useAppStore((state) => {
+    for (let index = state.messages.length - 1; index >= 0; index--) {
+      const tool = state.messages[index].toolCall
+      if (tool?.status === 'running') return { toolName: tool.toolName, toolInput: tool.toolInput }
+    }
+    return null
+  })
+  const [directorStage, setDirectorStage] = useState<{ nodeId: string; request?: DirectorStageRequest } | null>(null)
+  const directorStageRef = useRef(directorStage)
+  directorStageRef.current = directorStage
+  const directorWaitersRef = useRef(new Map<string, { resolve: (path: string) => void; reject: (error: Error) => void }>())
+
+  const openDirectorStage = useCallback((nodeId: string, request?: DirectorStageRequest) => {
+    setDirectorStage((current) => {
+      if (current?.request && current.request.id !== request?.id) {
+        const waiter = directorWaitersRef.current.get(current.request.id)
+        directorWaitersRef.current.delete(current.request.id)
+        waiter?.reject(new Error('导演台切换到其他导出请求，上一请求已取消'))
+      }
+      return { nodeId, request }
+    })
+  }, [])
+
+  const settleDirectorRequest = useCallback((requestId: string, result: { ok: true; relativePath: string } | { ok: false; error: string }) => {
+    const waiter = directorWaitersRef.current.get(requestId)
+    directorWaitersRef.current.delete(requestId)
+    if (result.ok) waiter?.resolve(result.relativePath)
+    else waiter?.reject(new Error(result.error))
+    setDirectorStage((current) => current?.request?.id === requestId ? { nodeId: current.nodeId } : current)
+  }, [])
+
+  useEffect(() => {
+    if (!directorStage) return
+    if (nodes.some((node) => node.id === directorStage.nodeId && node.data.kind === 'director')) return
+    setDirectorStage(null)
+  }, [directorStage, nodes])
+
+  useLayoutEffect(() => { referenceIndex.update(contentNodes, edges) }, [referenceIndex, contentNodes, edges])
   useEffect(() => {
     const unregister = registerEditFlusher(writer.flush)
     return () => { unregister(); void writer.flush().catch(() => {}) }
@@ -1950,6 +1861,8 @@ function CanvasFlow() {
           }
           completed.push(task)
         } else if (task.operation !== 'extract-audio' && node.data.kind === task.operation) {
+          if (task.workflowId && node.data.workflowId && task.workflowId !== node.data.workflowId) continue
+          if (node.data.generationStatus === 'generating' && (task.status === 'unknown' || task.status === 'failed')) continue
           const status = task.status === 'unknown' || task.status === 'failed' ? 'error' : 'generating'
           const error = task.error ?? ''
           if (node.data.generationStatus !== status || node.data.generationError !== error) nextNodes = nextNodes.map((item) => item.id === node.id ? { ...item, data: { ...item.data, generationStatus: status, generationError: error } } : item)
@@ -1969,6 +1882,10 @@ function CanvasFlow() {
     recoveringTasksRef.current = operation
     return operation
   }, [currentProject, setEdges, setNodes, snapshot, writer])
+
+  useEffect(() => {
+    void listCachedComfyWorkflows()
+  }, [])
 
   useEffect(() => {
     if (!loaded) return
@@ -1991,38 +1908,57 @@ function CanvasFlow() {
       patchNodeData(nodeId, { generationStatus: 'error', generationError: '请先输入文生图提示词' })
       return
     }
+    const blocked = blockedUpstreamGenerationMessage(nodeId, nodesRef.current, edgesRef.current)
+    if (blocked) {
+      patchNodeData(nodeId, { generationStatus: 'error', generationError: blocked })
+      return
+    }
     patchNodeData(nodeId, { generationStatus: 'generating', generationError: '' })
     try {
       const workflows: ComfyWorkflowInfo[] = await listCachedComfyWorkflows()
-      const available = workflows.filter((item) => item.kind === 'text-to-image')
-      const selectedWorkflow = available.find((item) => item.id === current.data.workflowId) ?? available[0]
-      const incomingImageNodes = edgesRef.current
-        .filter((edge) => edge.target === nodeId)
-        .map((edge) => nodesRef.current.find((node) => node.id === edge.source))
-        .filter((source): source is StoryNode => !!source && source.data.kind === 'image' && !!source.data.sourcePath)
-      const imageReferenceLimit = selectedWorkflow?.id.startsWith('google-')
-        ? 14
-        : selectedWorkflow?.id.startsWith('seedream-')
-          ? 10
-          : 0
-      const referenceImagePaths = orderImageReferences(
-        incomingImageNodes,
-        current.data.referenceImageNodeIds,
-        imageReferenceLimit,
-      ).map((source) => source.data.sourcePath!)
-      const result = await window.electronAPI.generateImage({
-        projectId: project.id,
-        nodeId,
-        prompt: current.data.prompt ?? '',
-        aspectRatio: current.data.aspectRatio ?? '16:9',
-        workflowId: selectedWorkflow?.id,
-        referenceImagePaths: imageReferenceLimit > 0 ? referenceImagePaths : undefined,
+      const selectedId = pickDefaultWorkflowId('text-to-image', workflows, current.data.workflowId)
+      await runGenerationFallbackChain({
+        chain: workflowFallbackChain('text-to-image', workflows, selectedId),
+        onSwitch: (nextId, previousError) => {
+          patchNodeData(nodeId, { workflowId: nextId, generationStatus: 'generating', generationError: `本节点已重试 3 次仍失败（${previousError}），已切换备用` })
+        },
+        onRetry: (_workflowId, attempt, previousError) => {
+          patchNodeData(nodeId, { generationStatus: 'generating', generationError: `本节点第 ${attempt} 次重试（${previousError}）` })
+        },
+        run: async (workflowId) => {
+          patchNodeData(nodeId, { workflowId })
+          const incomingImageNodes = edgesRef.current
+            .filter((edge) => edge.target === nodeId)
+            .map((edge) => nodesRef.current.find((node) => node.id === edge.source))
+            .filter((source): source is StoryNode => !!source && source.data.kind === 'image' && !!source.data.sourcePath)
+          const imageReferenceLimit = workflowId.startsWith('google-')
+            ? 14
+            : workflowId.startsWith('seedream-')
+              ? 10
+              : 0
+          const live = nodesRef.current.find((node) => node.id === nodeId) ?? current
+          const referenceImagePaths = orderImageReferences(
+            incomingImageNodes,
+            live.data.referenceImageNodeIds,
+            imageReferenceLimit,
+          ).map((source) => source.data.sourcePath!)
+          const result = await window.electronAPI.generateImage({
+            projectId: project.id,
+            nodeId,
+            prompt: live.data.prompt ?? '',
+            aspectRatio: live.data.aspectRatio === '9:16' || live.data.aspectRatio === '1:1' || live.data.aspectRatio === '4:3'
+              ? live.data.aspectRatio
+              : '16:9',
+            workflowId,
+            referenceImagePaths: imageReferenceLimit > 0 ? referenceImagePaths : undefined,
+          })
+          if (!result.success || !result.relativePath) {
+            throw new Error(result.error || '图片生成服务没有返回图片')
+          }
+          await applyGenerationResult(nodeId, project.id, result.relativePath)
+          await recoverTasks()
+        },
       })
-      if (!result.success || !result.relativePath) {
-        throw new Error(result.error || '图片生成服务没有返回图片')
-      }
-      await applyGenerationResult(nodeId, project.id, result.relativePath)
-      await recoverTasks()
     } catch (error) {
       if (projectIdRef.current !== project.id) return
       patchNodeData(nodeId, {
@@ -2040,65 +1976,80 @@ function CanvasFlow() {
       patchNodeData(nodeId, { generationStatus: 'error', generationError: '请先输入视频生成提示词' })
       return
     }
+    const blocked = blockedUpstreamGenerationMessage(nodeId, nodesRef.current, edgesRef.current)
+    if (blocked) {
+      patchNodeData(nodeId, { generationStatus: 'error', generationError: blocked })
+      return
+    }
     patchNodeData(nodeId, { generationStatus: 'generating', generationError: '' })
     try {
       const workflows: ComfyWorkflowInfo[] = await listCachedComfyWorkflows()
-      const available = workflows.filter((item) => item.kind === 'image-to-video')
-      const selectedWorkflow = available.find((item) => item.id === current.data.workflowId) ?? available[0]
-      const isSeedanceWorkflow = selectedWorkflow?.id.startsWith('seedance-') ?? false
-      const isReferenceWorkflow = (selectedWorkflow?.id.startsWith('minimax-h3-r2v') ?? false) || isSeedanceWorkflow
-      const isFirstLastWorkflow = selectedWorkflow?.id === 'minimax-h3-t2v-flf2v'
-      const incomingSources = edgesRef.current
-        .filter((edge) => edge.target === nodeId)
-        .map((edge) => nodesRef.current.find((node) => node.id === edge.source))
-        .filter((source): source is StoryNode => !!source)
-      const imageCandidates = incomingSources.filter((source) => source.data.kind === 'image' && source.data.sourcePath)
-      const referenceCandidates = incomingSources.filter((source) => (
-        source.data.kind === 'image' || source.data.kind === 'video' || source.data.kind === 'audio'
-      ) && source.data.sourcePath)
-      const resolveTrackPaths = (nodeIds: string[] | undefined, trackKind: 'image' | 'video' | 'audio') =>
-        (nodeIds ?? [])
-          .map((trackNodeId) => referenceCandidates.find((source) => source.id === trackNodeId))
-          .filter((source): source is StoryNode => !!source && source.data.kind === trackKind)
-          .map((source) => source.data.sourcePath!)
-      const referenceImagePaths = resolveTrackPaths(current.data.referenceImageNodeIds, 'image')
-      const referenceVideoPaths = resolveTrackPaths(current.data.referenceVideoNodeIds, 'video')
-      const referenceAudioPaths = resolveTrackPaths(current.data.referenceAudioNodeIds, 'audio')
-      if (isReferenceWorkflow) {
-        const error = referenceImagePaths.length > 9
-          ? '全模态参考图片轨最多放入 9 张图片'
-          : referenceVideoPaths.length > 3
-            ? '全模态参考视频轨最多放入 3 个视频'
-            : referenceAudioPaths.length > 3
-              ? '全模态参考音频轨最多放入 3 段音频'
-              : !isSeedanceWorkflow && referenceImagePaths.length + referenceVideoPaths.length + referenceAudioPaths.length === 0
-                ? '请从候选素材中至少拖一个图片、视频或音频到参考轨道'
-                : ''
-        if (error) {
-          patchNodeData(nodeId, { generationStatus: 'error', generationError: error })
-          return
-        }
-      }
-      const firstFrameNode = imageCandidates.find((source) => source.id === current.data.firstFrameNodeId)
-      const lastFrameNode = imageCandidates.find((source) => source.id === current.data.lastFrameNodeId)
-      const result = await window.electronAPI.generateVideo({
-        projectId: project.id,
-        nodeId,
-        prompt: current.data.prompt ?? '',
-        aspectRatio: current.data.aspectRatio ?? '16:9',
-        duration: normalizeVideoDuration(current.data.duration, selectedWorkflow?.id),
-        workflowId: selectedWorkflow?.id,
-        referenceImagePath: isFirstLastWorkflow ? firstFrameNode?.data.sourcePath : undefined,
-        lastFrameImagePath: isFirstLastWorkflow ? lastFrameNode?.data.sourcePath : undefined,
-        referenceImagePaths: isReferenceWorkflow ? referenceImagePaths : undefined,
-        referenceVideoPaths: isReferenceWorkflow ? referenceVideoPaths : undefined,
-        referenceAudioPaths: isReferenceWorkflow ? referenceAudioPaths : undefined,
+      const selectedId = pickDefaultWorkflowId('image-to-video', workflows, current.data.workflowId)
+      await runGenerationFallbackChain({
+        chain: workflowFallbackChain('image-to-video', workflows, selectedId),
+        onSwitch: (nextId, previousError) => {
+          patchNodeData(nodeId, { workflowId: nextId, generationStatus: 'generating', generationError: `本节点已重试 3 次仍失败（${previousError}），已切换备用` })
+        },
+        onRetry: (_workflowId, attempt, previousError) => {
+          patchNodeData(nodeId, { generationStatus: 'generating', generationError: `本节点第 ${attempt} 次重试（${previousError}）` })
+        },
+        run: async (workflowId) => {
+          patchNodeData(nodeId, { workflowId, generationStatus: 'generating' })
+          const live = nodesRef.current.find((node) => node.id === nodeId) ?? current
+          const isSeedanceWorkflow = workflowId.startsWith('seedance-')
+          const isEasyH3Workflow = workflowId === 'minimax-h3-easy' || workflowId === 'minimax-h3-easy-2pass'
+          const isReferenceWorkflow = workflowId.startsWith('minimax-h3-r2v') || isSeedanceWorkflow || isEasyH3Workflow
+          const isFirstLastWorkflow = workflowId === 'minimax-h3-t2v-flf2v' || isEasyH3Workflow
+          const incomingSources = edgesRef.current
+            .filter((edge) => edge.target === nodeId)
+            .map((edge) => nodesRef.current.find((node) => node.id === edge.source))
+            .filter((source): source is StoryNode => !!source)
+          const imageCandidates = incomingSources.filter((source) => source.data.kind === 'image' && source.data.sourcePath)
+          const referenceCandidates = incomingSources.filter((source) => (
+            source.data.kind === 'image' || source.data.kind === 'video' || source.data.kind === 'audio'
+          ) && source.data.sourcePath)
+          const resolveTrackPaths = (nodeIds: string[] | undefined, trackKind: 'image' | 'video' | 'audio') =>
+            (nodeIds ?? [])
+              .map((trackNodeId) => referenceCandidates.find((source) => source.id === trackNodeId))
+              .filter((source): source is StoryNode => !!source && source.data.kind === trackKind)
+              .map((source) => source.data.sourcePath!)
+          const referenceImagePaths = resolveTrackPaths(live.data.referenceImageNodeIds, 'image')
+          const referenceVideoPaths = resolveTrackPaths(live.data.referenceVideoNodeIds, 'video')
+          const referenceAudioPaths = resolveTrackPaths(live.data.referenceAudioNodeIds, 'audio')
+          if (isReferenceWorkflow) {
+            const error = referenceImagePaths.length > 9
+              ? '全模态参考图片轨最多放入 9 张图片'
+              : referenceVideoPaths.length > 3
+                ? '全模态参考视频轨最多放入 3 个视频'
+                : referenceAudioPaths.length > 3
+                  ? '全模态参考音频轨最多放入 3 段音频'
+                  : !isSeedanceWorkflow && !isEasyH3Workflow && referenceImagePaths.length + referenceVideoPaths.length + referenceAudioPaths.length === 0
+                    ? '请从候选素材中至少拖一个图片、视频或音频到参考轨道'
+                    : ''
+            if (error) throw new Error(error)
+          }
+          const firstFrameNode = imageCandidates.find((source) => source.id === live.data.firstFrameNodeId)
+          const lastFrameNode = imageCandidates.find((source) => source.id === live.data.lastFrameNodeId)
+          const result = await window.electronAPI.generateVideo({
+            projectId: project.id,
+            nodeId,
+            prompt: live.data.prompt ?? '',
+            aspectRatio: live.data.aspectRatio ?? '16:9',
+            duration: normalizeVideoDuration(live.data.duration, workflowId),
+            workflowId,
+            referenceImagePath: isFirstLastWorkflow ? firstFrameNode?.data.sourcePath : undefined,
+            lastFrameImagePath: isFirstLastWorkflow ? lastFrameNode?.data.sourcePath : undefined,
+            referenceImagePaths: isReferenceWorkflow ? referenceImagePaths : undefined,
+            referenceVideoPaths: isReferenceWorkflow ? referenceVideoPaths : undefined,
+            referenceAudioPaths: isReferenceWorkflow ? referenceAudioPaths : undefined,
+          })
+          if (!result.success || !result.relativePath) {
+            throw new Error(result.error || '视频生成服务没有返回视频')
+          }
+          await applyGenerationResult(nodeId, project.id, result.relativePath)
+          await recoverTasks()
+        },
       })
-      if (!result.success || !result.relativePath) {
-        throw new Error(result.error || '视频生成服务没有返回视频')
-      }
-      await applyGenerationResult(nodeId, project.id, result.relativePath)
-      await recoverTasks()
     } catch (error) {
       if (projectIdRef.current !== project.id) return
       patchNodeData(nodeId, {
@@ -2112,6 +2063,11 @@ function CanvasFlow() {
     const project = useAppStore.getState().currentProject
     const current = nodesRef.current.find((node) => node.id === nodeId)
     if (!project || !current || current.data.kind !== 'upscale') return
+    const blocked = blockedUpstreamGenerationMessage(nodeId, nodesRef.current, edgesRef.current)
+    if (blocked) {
+      patchNodeData(nodeId, { generationStatus: 'error', generationError: blocked })
+      return
+    }
     const inputCandidates = edgesRef.current
       .filter((edge) => edge.target === nodeId)
       .map((edge) => nodesRef.current.find((node) => node.id === edge.source))
@@ -2149,6 +2105,176 @@ function CanvasFlow() {
     }
   }
 
+  const captureDirectorStill = async (
+    nodeId: string,
+    pngDataUrl: string,
+    shot: DirectorShot,
+    directorProject: DirectorProject,
+  ): Promise<string> => {
+    const project = useAppStore.getState().currentProject
+    if (!project) throw new Error('当前项目不可用')
+    const captureProjectId = project.id
+    const assertCaptureContext = () => {
+      if (useAppStore.getState().currentProject?.id !== captureProjectId) throw new Error('项目已切换，已取消写回本次导演台截图')
+      if (!nodesRef.current.some((node) => node.id === nodeId && node.data.kind === 'director')) {
+        throw new Error('导演台节点已不存在，已取消写回截图')
+      }
+    }
+    const pngData = await fetch(pngDataUrl).then((response) => response.arrayBuffer())
+    assertCaptureContext()
+    const result = await window.electronAPI.saveDirectorStill({
+      projectId: captureProjectId,
+      nodeId,
+      shotId: shot.id,
+      shotName: shot.name,
+      pngData,
+    })
+    if (!result.success || !result.relativePath) throw new Error(result.error || '导演台截图保存失败')
+    assertCaptureContext()
+    const relativePath = result.relativePath
+    const preview = workspacePreview(captureProjectId, relativePath)
+    const liveNodes = nodesRef.current
+    const sourceNode = liveNodes.find((node) => node.id === nodeId)
+    if (!sourceNode) throw new Error('导演台节点已不存在，已取消写回截图')
+    const outputCount = liveNodes.filter((node) => node.data.kind === 'image' && node.data.sourcePath?.includes('generated/director-stills/')).length
+    const imageNode = makeNode('image', liveNodes.length + 1, {
+      x: sourceNode.position.x + 600 + outputCount * 680,
+      y: sourceNode.position.y,
+    })
+    imageNode.data = {
+      ...imageNode.data,
+      title: `${shot.name} · 构图参考`,
+      aspectRatio: shot.aspectRatio,
+      sourcePath: relativePath,
+      preview,
+      prompt: shot.notes ?? '',
+      readOnly: true,
+    }
+    const nextNodes = [
+      ...liveNodes.map((node) => node.id === nodeId
+        ? { ...node, data: { ...node.data, directorProject, sourcePath: relativePath, preview, generationStatus: 'idle' as const, generationError: '' } }
+        : node),
+      imageNode,
+    ]
+    nodesRef.current = nextNodes
+    setNodes(nextNodes)
+    setEdges((edges) => [...edges, makeLinkedEdge(`edge-${nodeId}-${imageNode.id}`, nodeId, imageNode.id)])
+    return relativePath
+  }
+
+  const exportDirectorVideo = async (
+    nodeId: string,
+    webmData: ArrayBuffer,
+    shot: DirectorShot,
+    directorProject: DirectorProject,
+  ): Promise<string> => {
+    const project = useAppStore.getState().currentProject
+    if (!project) throw new Error('当前项目不可用')
+    const exportProjectId = project.id
+    const assertExportContext = () => {
+      if (useAppStore.getState().currentProject?.id !== exportProjectId) throw new Error('项目已切换，已取消写回本次导演台预演视频')
+      if (!nodesRef.current.some((node) => node.id === nodeId && node.data.kind === 'director')) {
+        throw new Error('导演台节点已不存在，已取消写回预演视频')
+      }
+    }
+    assertExportContext()
+    const result = await window.electronAPI.saveDirectorVideo({
+      projectId: exportProjectId,
+      nodeId,
+      shotId: shot.id,
+      shotName: shot.name,
+      webmData,
+    })
+    if (!result.success || !result.relativePath) throw new Error(result.error || '导演台预演视频保存失败')
+    assertExportContext()
+    const relativePath = result.relativePath
+    const preview = workspacePreview(exportProjectId, relativePath)
+    const liveNodes = nodesRef.current
+    const sourceNode = liveNodes.find((node) => node.id === nodeId)
+    if (!sourceNode) throw new Error('导演台节点已不存在，已取消写回预演视频')
+    const outputCount = liveNodes.filter((node) => (
+      node.data.sourcePath?.includes('generated/director-stills/')
+      || node.data.sourcePath?.includes('generated/director-videos/')
+    )).length
+    const videoNode = makeNode('video', liveNodes.length + 1, {
+      x: sourceNode.position.x + 600 + outputCount * 680,
+      y: sourceNode.position.y,
+    })
+    videoNode.data = {
+      ...videoNode.data,
+      title: `${shot.name} · 预演视频`,
+      aspectRatio: shot.aspectRatio,
+      duration: shot.durationSec,
+      sourcePath: relativePath,
+      preview,
+      prompt: shot.notes ?? '',
+      readOnly: true,
+    }
+    const nextNodes = [
+      ...liveNodes.map((node) => node.id === nodeId
+        ? { ...node, data: { ...node.data, directorProject, sourcePath: relativePath, preview, generationStatus: 'idle' as const, generationError: '' } }
+        : node),
+      videoNode,
+    ]
+    nodesRef.current = nextNodes
+    setNodes(nextNodes)
+    setEdges((edges) => [...edges, makeLinkedEdge(`edge-${nodeId}-${videoNode.id}`, nodeId, videoNode.id)])
+    return relativePath
+  }
+
+  const requestDirectorSceneFromAgent = async (
+    nodeId: string,
+    reference: { nodeId: string; title: string; sourcePath: string },
+    instruction: string,
+  ): Promise<void> => {
+    const project = useAppStore.getState().currentProject
+    if (!project) throw new Error('当前项目不可用')
+    const directorNode = nodesRef.current.find((node) => node.id === nodeId && node.data.kind === 'director')
+    if (!directorNode) throw new Error('导演台节点已不存在')
+    const liveReference = nodesRef.current.find((node) => node.id === reference.nodeId && node.data.kind === 'image')
+    if (!liveReference || liveReference.data.sourcePath !== reference.sourcePath) throw new Error('参考图片节点已变化，请重新选择')
+    const extra = instruction.trim() ? `\n补充要求：${instruction.trim()}` : ''
+    await sendScopedAgentMessage(
+      `请使用你的多模态能力读取所引用图片节点的 sourcePath，并分析图片内容；然后为所引用的 3D 导演台生成一个可编辑的简易白模空间。先调用 GetCanvasCapabilities 获取 director 的 apply-scene-draft 参数约束，再调用 InvokeNodeAction 将草案应用到导演台。只使用 ${DIRECTOR_PRIMITIVE_KINDS.join('、')}，最多 40 个素材；优先用专用类型表达地面、高台、楼梯、斜坡、门窗、桌椅、沙发、床、柜子和栏杆。每个素材必须正确声明 ground/elevated，地面、道路、建筑主体、围墙和落地家具必须 ground，窗框、屋顶、横梁、招牌等真实离地结构使用 elevated。注意 position 是底面锚点，scale 是完整宽/高/深（米），门窗框保留真实开口，不要在开口处叠加实心墙体。保留演员、手工元素、其他参考图生成的元素和全部机位。完成后用 GetCanvasNode 核对导演台工程，并确认全部 ground 元素的 position.y 都为 0。${extra}`,
+      [
+        { id: nodeId, title: directorNode.data.title, kind: 'director' },
+        { id: reference.nodeId, title: reference.title, kind: 'image' },
+      ],
+    )
+  }
+
+  const exportDirectorMedia = async (nodeId: string, actionId: 'capture-still' | 'export-video', params: Record<string, unknown> = {}) => {
+    const node = nodesRef.current.find((item) => item.id === nodeId)
+    if (!node || node.data.kind !== 'director') throw new Error(`导演台节点不存在：${nodeId}`)
+    if (node.data.generationStatus === 'generating' || directorStageRef.current?.request) {
+      patchNodeData(nodeId, { generationStatus: 'error', generationError: '导演台正在导出，请等待完成后再试' })
+      return
+    }
+    const project = normalizeDirectorProject(node.data.directorProject, node.data.title)
+    const shotId = typeof params.shotId === 'string' && params.shotId.trim() ? params.shotId : undefined
+    if (shotId && !project.shots.some((shot) => shot.id === shotId)) {
+      patchNodeData(nodeId, { generationStatus: 'error', generationError: `找不到 Shot：${shotId}` })
+      return
+    }
+    const frame = typeof params.frame === 'number' && Number.isFinite(params.frame) ? Math.floor(params.frame) : undefined
+    const requestId = crypto.randomUUID()
+    const request: DirectorStageRequest = { id: requestId, type: actionId, shotId, frame }
+    patchNodeData(nodeId, { generationStatus: 'generating', generationError: '' })
+    const resultPromise = new Promise<string>((resolve, reject) => {
+      directorWaitersRef.current.set(requestId, { resolve, reject })
+    })
+    openDirectorStage(nodeId, request)
+    try {
+      await resultPromise
+    } catch (error) {
+      if (projectIdRef.current !== useAppStore.getState().currentProject?.id) return
+      patchNodeData(nodeId, {
+        generationStatus: 'error',
+        generationError: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
   useEffect(() => {
     const unregisterImage = registerNodeKindAction('image', 'generate', (nodeId) => generateImageNode(nodeId))
     const unregisterVideo = registerNodeKindAction('video', 'generate', (nodeId) => generateVideoNode(nodeId))
@@ -2172,11 +2298,36 @@ function CanvasFlow() {
       setNodes(nodesRef.current)
       return { action: actionId, nodeId, updatedAt: next.updatedAt }
     }))
+    const unregisterCapture = registerNodeKindAction('director', 'capture-still', (nodeId, params) => exportDirectorMedia(nodeId, 'capture-still', params))
+    const unregisterExport = registerNodeKindAction('director', 'export-video', (nodeId, params) => exportDirectorMedia(nodeId, 'export-video', params))
+    const unregisterReview = registerNodeKindAction('director', 'review-scene', async (nodeId, params = {}) => {
+      const node = nodesRef.current.find((item) => item.id === nodeId)
+      if (!node || node.data.kind !== 'director') throw new Error(`导演台节点不存在：${nodeId}`)
+      const current = normalizeDirectorProject(node.data.directorProject, node.data.title)
+      const applyFixes = params.applyFixes !== false
+      const { project, fixed } = applyFixes ? applyDirectorReviewAutoFixes(current) : { project: current, fixed: [] as string[] }
+      if (fixed.length > 0) {
+        const next = { ...project, updatedAt: Date.now() }
+        const issues = validateDirectorProject(next)
+        if (issues.length > 0) throw new Error(issues.join('；'))
+        nodesRef.current = nodesRef.current.map((item) => item.id === nodeId
+          ? { ...item, data: { ...item.data, directorProject: next } }
+          : item)
+        setNodes(nodesRef.current)
+        const remaining = reviewDirectorProject(next)
+        return { action: 'review-scene', nodeId, ok: directorReviewPassed(remaining), fixed, issues: remaining, updatedAt: next.updatedAt }
+      }
+      const remaining = reviewDirectorProject(project)
+      return { action: 'review-scene', nodeId, ok: directorReviewPassed(remaining), fixed, issues: remaining }
+    })
     return () => {
       unregisterImage()
       unregisterVideo()
       unregisterUpscale()
       unregisterDirector.forEach((unregister) => unregister())
+      unregisterCapture()
+      unregisterExport()
+      unregisterReview()
     }
     // Handlers only touch stable refs/setters, so registering once is safe.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2292,6 +2443,10 @@ function CanvasFlow() {
               const actionDescriptor = getNodeCapabilities(node.data.kind)
                 ?.actions.find((item) => item.id === actionId)
               if (!actionDescriptor) return { nodeId, accepted: false as const, error: `该节点类型（${node.data.kind}）不支持动作：${actionId || '(未提供 action)'}` }
+              if (actionId === 'generate') {
+                const blocked = blockedUpstreamGenerationMessage(nodeId, nodesRef.current, edgesRef.current)
+                if (blocked) return { nodeId, accepted: false as const, error: blocked }
+              }
               const nodeHandler = getNodeAction(nodeId, actionId)
               const kindHandler = getNodeKindAction(node.data.kind, actionId)
               if (!nodeHandler && !kindHandler) return { nodeId, accepted: false as const, error: '动作处理器尚未注册（画布未就绪）' }
@@ -2477,7 +2632,7 @@ function CanvasFlow() {
               ? { ...node, data: { ...node.data, generationStatus: 'idle' as const, generationError: '' } }
               : node
           })
-          const restoredEdges = migrated.edges.map((edge) => ({ ...edge, type: 'default' as const }))
+          const restoredEdges = migrated.edges.map((edge) => ({ ...edge, type: 'default' as const, animated: false }))
           nodesRef.current = restoredNodes
           edgesRef.current = restoredEdges
           setNodes(restoredNodes)
@@ -2529,6 +2684,7 @@ function CanvasFlow() {
 
   useEffect(() => {
     if (!readyToSaveRef.current || artifacts.length === 0) return
+    const nodes = contentNodes
     const additions: StoryNode[] = []
     const linkedEdges: StoryEdge[] = []
 
@@ -2623,7 +2779,7 @@ function CanvasFlow() {
         return freshEdges.length > 0 ? [...current, ...freshEdges] : current
       })
     }
-  }, [artifacts, dismissedArtifacts, nodes, setEdges, setNodes])
+  }, [artifacts, contentNodes, dismissedArtifacts, setEdges, setNodes])
 
   const handleNodesChange = useCallback((changes: NodeChange<StoryNode>[]) => {
     // React Flow listens for Delete/Backspace globally. Full-screen node editors
@@ -2645,7 +2801,7 @@ function CanvasFlow() {
       useAppStore.getState().removeCanvasNodeReference(nodeId)
     }
 
-    const removedArtifacts = nodes
+    const removedArtifacts = nodesRef.current
       .filter((node) => removedIds.has(node.id) && node.data.artifactId)
       .map((node) => node.data.artifactId!)
     if (removedArtifacts.length > 0) {
@@ -2661,7 +2817,7 @@ function CanvasFlow() {
 
     onNodesChange(safeChanges)
     setEdges((current) => current.filter((edge) => !removedIds.has(edge.source) && !removedIds.has(edge.target)))
-  }, [artifacts, nodes, onNodesChange, setEdges])
+  }, [artifacts, onNodesChange, setEdges])
 
   const onConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return
@@ -2753,7 +2909,20 @@ function CanvasFlow() {
     ? projectAssets
     : projectAssets.filter((asset) => asset.kind === assetFilter)
 
+  const directorStageNode = directorStage
+    ? nodes.find((node) => node.id === directorStage.nodeId && node.data.kind === 'director')
+    : undefined
+  const directorReferenceImages = directorStageNode && currentProject
+    ? referenceIndex.get(directorStageNode.id).map((node) => ({
+      nodeId: node.id,
+      title: node.data.title,
+      sourcePath: node.data.sourcePath!,
+      preview: node.data.preview ?? workspacePreview(currentProject.id, node.data.sourcePath!),
+    }))
+    : []
+
   return (
+    <DirectorStageContext.Provider value={{ open: (nodeId) => openDirectorStage(nodeId), activeNodeId: directorStage?.nodeId ?? null }}>
     <PersistNodeContext.Provider value={persistNode}>
     <RecoverTasksContext.Provider value={recoverTasks}>
     <div ref={canvasContainerRef} className="relative h-full w-full bg-[#0a0a0f]">
@@ -2762,10 +2931,16 @@ function CanvasFlow() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onMoveEnd={() => { if (readyToSaveRef.current) writer.schedule(snapshot()) }}
+        onMoveStart={beginViewportInteraction}
+        onMoveEnd={endViewportInteraction}
+        onNodeDragStart={beginNodeInteraction}
+        onNodeDragStop={endNodeInteraction}
+        onSelectionDragStart={beginNodeInteraction}
+        onSelectionDragStop={endNodeInteraction}
         onDragOver={handleAssetDragOver}
         onDrop={handleAssetDrop}
         selectionOnDrag={interactionMode === 'select'}
@@ -2782,7 +2957,7 @@ function CanvasFlow() {
         onlyRenderVisibleElements
         fitViewOptions={{ padding: 0.2 }}
       >
-        <Background color="rgba(255,255,255,0.16)" gap={18} size={1} variant={BackgroundVariant.Dots} />
+        <CanvasBackground />
         <Controls position="bottom-left" showInteractive={false} />
         <MiniMap
           position="bottom-right"
@@ -2954,9 +3129,29 @@ function CanvasFlow() {
           {loadError && <><p className="text-xs">原文件已保留，修复文件或恢复备份后可重新加载。</p><button onClick={() => setLoadAttempt((value) => value + 1)} className="rounded-lg border border-[#d4af37]/50 px-4 py-2 text-[#e8c766]">重新加载</button></>}
         </div>
       </div>}
+      {directorStageNode && currentProject && (
+        <Suspense fallback={<div className="fixed inset-0 z-[200] flex items-center justify-center bg-[#090a0e] text-sm text-[#e8c766]">正在加载 3D 导演台…</div>}>
+          <DirectorStageDialog
+            project={normalizeDirectorProject(directorStageNode.data.directorProject, directorStageNode.data.title)}
+            onChange={(directorProject) => persistNode(directorStageNode.id, { directorProject })}
+            onCapture={(pngDataUrl, shot, directorProject) => captureDirectorStill(directorStageNode.id, pngDataUrl, shot, directorProject)}
+            onExportVideo={(webmData, shot, directorProject) => exportDirectorVideo(directorStageNode.id, webmData, shot, directorProject)}
+            referenceImages={directorReferenceImages}
+            agentBusy={directorAgentBusy}
+            generationStatus={directorStageNode.data.generationStatus}
+            generationError={directorStageNode.data.generationError}
+            runningTool={directorRunningTool}
+            onRequestAgentScene={(reference, instruction) => requestDirectorSceneFromAgent(directorStageNode.id, reference, instruction)}
+            request={directorStage?.request}
+            onRequestSettled={settleDirectorRequest}
+            onClose={() => setDirectorStage(null)}
+          />
+        </Suspense>
+      )}
     </div>
     </RecoverTasksContext.Provider>
     </PersistNodeContext.Provider>
+    </DirectorStageContext.Provider>
   )
 }
 
