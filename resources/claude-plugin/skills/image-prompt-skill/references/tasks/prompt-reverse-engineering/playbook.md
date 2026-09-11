@@ -172,6 +172,7 @@
 - 单图职责与保留强度：`../../inputs/single-image-reference.md`
 - 镜头与透视：`../../controls/composition-camera/shot-angle-lens-selection.md`
 - 光影控制：`../../controls/lighting-color/index.md`
+- 真实照片与去 AI 感：`../../controls/realism-quality/index.md`
 - 具体色调：`../../libraries/lighting-color/index.md`
 - 风格实现：`../../styles/index.md`
 - 多图参考冲突：`../../inputs/multi-image-reference.md`

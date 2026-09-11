@@ -1,17 +1,18 @@
 # Prompt Compilation
 
-Use this reference after the video has been decomposed into shots/events, important changes have been identified, and continuity has been extracted.
+Use this reference after the clip has been decomposed into shots/events, important temporal changes have been identified, and continuity has been extracted.
 
 ## Goal
 
-Convert reverse-engineering analysis into a professional generation prompt that explains not only **what is visible**, but also **how it behaves and changes over time**.
+Convert reverse-engineering analysis into a professional generation prompt that explains not only **what is visible**, but also **how it behaves, changes, and is presented over time**.
 
-A strong reverse prompt should encode, when relevant:
+A strong reverse prompt can encode, when relevant:
 
 - subject identity and state
 - visible performance and micro-expression
 - action process and physical quality
 - spatial/compositional relationships
+- spatial continuity: screen coordinates, world anchors, depth, body orientation, eyelines, occlusion and axis
 - camera behavior and its visible effect
 - environment depth and atmosphere
 - lighting behavior
@@ -23,7 +24,7 @@ A strong reverse prompt should encode, when relevant:
 
 ## Canonical Prompt Order
 
-Use flexibly rather than as a rigid template:
+Use flexibly, not as a rigid template:
 
 ```text
 Overview header
@@ -38,14 +39,14 @@ Inside each shot, keep this emphasis order when the evidence supports it:
 ```text
 Subject / Performance / Action
 → Spatial & composition relationship
-→ Camera behavior
+→ Camera behavior and visible frame effect
 → Environment
 → Lighting
 → Material & style
 → Temporal progression / edit grammar
 ```
 
-The emphasis should follow the video. A facial-performance clip should spend more words on performance; a landscape shot should spend more on camera, light, atmosphere and space.
+The emphasis must follow the video. A facial-performance clip may spend most of its words on performance; an action clip may prioritize movement quality and camera response; a landscape shot may prioritize space, light, atmosphere and camera movement.
 
 ## Overview Header
 
@@ -77,6 +78,8 @@ SHOT NN — [time or function]
 
 This contract is the generation interface. Analysis dimensions may be sparse; empty analysis fields stay omitted. Do not pad micro-expression, composition-theory labels, or lighting recipe names into unused slots.
 
+When multiple subjects or cross-shot geography matters, the contract also carries a spatial continuity layer. Put concrete relations inside the five sections; add a separate `空间连续性` line only when the relation cannot be read safely from those sections alone.
+
 ### Weak vs contract
 
 Weak:
@@ -106,55 +109,157 @@ If a subject enters or leaves the frame, the action part must say:
 
 If nobody enters or exits, do not add an entry sentence.
 
+## Spatial Continuity and Shot Grammar
+
+For dialogue, OTS, reverse shots, two-shots, chases, vehicle interiors or repeated locations, do not use an unqualified left/right. State the reference frame and keep these separate:
+
+- screen-left / screen-right in the current shot;
+- stable world position such as door, window, driver's seat or table side;
+- foreground/midground/background and who overlaps whom;
+- body orientation versus eye direction;
+- camera side relative to the interaction or movement axis;
+- movement direction, destination and landmark order.
+
+Example:
+
+```text
+空间连续性：A 位于屏幕左前景、靠近镜头，世界位置在门边；B 位于屏幕右后景、靠近窗边。A 身体朝向屏幕右侧，视线锁定 B；B 身体朝向屏幕左侧，视线锁定 A。两镜保持 A–B 180° 轴线，门与窗不互换。
+```
+
+Use the professional label together with the visible relation:
+
+```text
+中近景 OTS（A 过肩看 B）
+B 的反向 OTS（保持同一轴线）
+双人镜头（A 屏幕左前景，B 屏幕右后景）
+反应镜头（主体看向画面右外的事件目标）
+```
+
+For a reverse shot, change the observation position and foreground shoulder; do not silently mirror the room, swap background anchors, or reverse eyelines. If the camera crosses the 180-degree axis, describe the visible turn/neutral transition or declare a new spatial segment.
+
 ### Camera must be a move, not a shot size
 
 Shot size belongs in 起始画面 / 结束画面. Camera motion must still answer: why it moves, from where, along what path, how fast, where it stops. Locked-off cameras must be explicit.
 
 ## Description Enrichment Before Compilation
 
-Before writing the final prompt, check whether important observations are still too generic.
+## Mandatory Three-Pass Professional Refinement
 
-### Emotion
+Before writing the final prompt, inspect every important Shot with these three questions. This is a quality pass, not a requirement to make every sentence longer.
+
+### Pass 1 — Emotion → Visible Performance
+
+Ask:
+
+> Is the description still relying on emotional labels such as “tense,” “tired,” “alert,” “sad,” “intimate,” or “restrained” without showing how they appear?
+
+When evidence permits, translate the label into visible behavior:
+
+- gaze direction and gaze hold
+- eye / brow / mouth / jaw changes
+- breath or swallowing
+- head and shoulder tension
+- hand behavior
+- reduction or increase in movement
+- restraint, conflict, release
 
 Weak:
 
 ```text
-She becomes sad.
+They remain tense and restrained.
 ```
 
 Better:
 
 ```text
-Her smile first pauses rather than disappearing; her gaze briefly drops, the eyes lose their earlier lightness, the lips slowly tighten, and moisture begins to gather in the eyes while she tries to hold the expression together.
+Neither character makes a broad emotional gesture. Their mouths stay relatively still, the body posture remains controlled, and attention is held forward or toward the mirror; the tension reads through reduced movement and sustained observation rather than exaggerated reaction.
 ```
 
-### Action
+Keep an emotion word if useful, but let it summarize visible evidence rather than replace it.
+
+### Pass 2 — Action Event → Action Quality
+
+Ask:
+
+> Is an important action represented only by a verb?
+
+When useful, add selected movement properties:
+
+- starting state
+- hesitation / anticipation
+- path
+- speed / acceleration
+- force / weight
+- body participation
+- contact mode
+- physical response
+- follow-through
+- ending state
+- interaction initiation and response
 
 Weak:
 
 ```text
-She pushes his arm away.
+She reaches out and holds his hand.
 ```
 
 Better:
 
 ```text
-After a short hesitation, she uses her forearm and shoulder to slowly guide his arm away, the movement restrained but deliberate, then subtly shifts her body farther toward the door.
+She slowly extends one hand into the space between them, with a brief hesitation before contact. Without taking his attention off the road, he frees his other hand to respond; their hands overlap at the center of the frame and remain in contact rather than immediately separating.
 ```
 
-### Camera
+Do not expand a simple movement into invented choreography.
+
+### Pass 3 — Camera Term → Visible Camera Effect
+
+Ask:
+
+> Is the camera description only a technical label such as “handheld,” “tracking,” “slow push-in,” “rack focus,” or “stable shot”?
+
+When evidence permits, explain what changes inside the frame:
+
+- subject scale
+- screen position
+- foreground/background motion
+- parallax
+- perspective
+- focus / depth allocation
+- stability character
+- start/stop behavior
+- camera-action synchronization
 
 Weak:
 
 ```text
-Slight handheld movement.
+Stable shot with slight vibration.
 ```
 
 Better:
 
 ```text
-The framing remains generally stable but carries continuous low-amplitude irregular vibration, causing subtle drift in the faces and interior lines rather than exaggerated shake.
+The overall composition stays locked and readable while continuous low-amplitude road vibration causes subtle vertical and lateral drift in the faces, windshield edges and interior lines; the motion feels like vehicle feedback rather than free handheld shake.
 ```
+
+Weak:
+
+```text
+Rack focus from the pursuit cars to the woman.
+```
+
+Better:
+
+```text
+The distant pursuit vehicles begin as the sharper information inside the mirror while the woman’s reflection remains slightly soft; focus then migrates toward her reflected face, allowing the vehicles to blur as attention shifts from the external threat to her reaction.
+```
+
+For the full rules and combined examples, read `professional-description-pillars.md`.
+
+---
+
+## General Description Enrichment
+
+After the three high-priority passes, enrich other dimensions only where they matter.
 
 ### Lighting
 
@@ -167,7 +272,7 @@ Warm sunlight.
 Better:
 
 ```text
-Hard warm sunlight enters diagonally through the windshield, catching skin, sunglasses and beige upholstery; alternating road shadows repeatedly cut across the faces, creating moving bands of bright heat and dense shadow.
+Warm low-angle sunlight enters through the windshield and side windows, catching skin, sunglasses and aged upholstery; passing shadows periodically sweep across the faces and interior, causing the bright and dark areas to change as the car moves.
 ```
 
 ### Environment
@@ -181,14 +286,30 @@ A desert highway.
 Better:
 
 ```text
-A straight highway runs through an exposed, nearly empty desert with a low horizon and visible heat shimmer in the distance; pale sand and sparse roadside detail streak backward, reinforcing speed and isolation.
+A straight road cuts through an exposed, sparsely vegetated desert with a low horizon and light heat shimmer in the distance; pale ground and roadside detail move steadily backward, reinforcing speed and isolation.
 ```
 
-Enhancement should add observable behavior, not invented narrative.
+### Material
+
+Weak:
+
+```text
+An old red car with beige interior.
+```
+
+Better:
+
+```text
+The red paint is slightly sun-faded with uneven soft reflections, while the beige interior shows small creases and aged surface wear consistent with an older vehicle.
+```
+
+Enhancement must add observable behavior or surface character, not invented narrative.
+
+---
 
 ## Single Continuous Shot
 
-Still use the five-part contract. The temporal chain lives inside 主体动作 and 摄影机运动:
+Still use the five-part contract. Express progression as a temporal chain inside 主体动作 and 摄影机运动:
 
 ```text
 起始画面 ...
@@ -198,24 +319,23 @@ Still use the five-part contract. The temporal chain lives inside 主体动作 a
 镜头衔接: none, continuous take
 ```
 
-Example skeleton:
+Useful skeleton:
 
 ```text
 A continuous [shot type] centered on [subject/performance] in [environment].
-起始画面：[opening state + composition].
-主体动作：[visible performance/action progression].
-摄影机运动：[movement + visible framing/parallax effect + where it stops].
-Lighting/material/environment [important temporal behavior] belong in those four parts when they change.
-结束画面：[ending state].
-镜头衔接：none, continuous take.
-Maintain [important continuity] once in GLOBAL CONTINUITY.
+Start with [opening state + composition].
+The subject [visible performance/action progression].
+As this changes, the camera [movement + visible framing/parallax/focus effect].
+Lighting/material/environment [important temporal behavior].
+At the emotional/action peak, [threshold/reveal/impact].
+End with [ending state].
+Maintain [important continuity].
 ```
 
-For a performance-heavy close-up, the performance progression may dominate 主体动作, but 起始画面 and 结束画面 must still be two different readable frames.
+For a performance-heavy close-up, the performance progression may be the dominant part of the entire prompt.
+For a performance-heavy close-up, 起始画面 and 结束画面 must still be two different readable frames.
 
 ## Performance Compilation
-
-When acting is central, prefer a **Performance Timeline** or continuous emotional progression.
 
 Avoid:
 
@@ -226,18 +346,14 @@ happy → sad → crying
 Prefer:
 
 ```text
-The smile begins natural and relaxed. It does not vanish immediately; it first holds a little too long, then becomes smaller. Her gaze briefly drops and returns, now more fixed and less playful. Moisture slowly gathers along the eyes while the lips tighten and the jaw becomes subtly tense. She continues trying to maintain a faint smile even after the eyes have become visibly emotional. Only near the end does the smile finally collapse and the face approach tears.
+The smile begins natural and relaxed. It does not disappear immediately; it first holds, then becomes smaller. Her gaze briefly drops and returns more fixed, the eyes gradually lose their earlier lightness, and moisture starts gathering along the lower eyelids. The lips tighten and the jaw becomes subtly tense as she continues trying to preserve a faint smile. Only near the end does the smile finally lose support and the face approach tears.
 ```
 
-Keep the intensity faithful to the reference: restrained acting should remain restrained.
-
-Read `performance-and-microexpression.md` when facial acting is a major part of the clip.
+Keep restrained acting restrained. Read `performance-and-microexpression.md` when facial acting is a major part of the clip.
 
 ## Multi-Shot Sequence
 
-Do not merge editing boundaries into fake continuous camera moves.
-
-Recommended structure:
+Preserve real editing boundaries:
 
 ```text
 GLOBAL CONTINUITY
@@ -246,7 +362,7 @@ GLOBAL CONTINUITY
 SHOT 01 — [time/function]
 ...
 
-HARD CUT / MATCH CUT / DISSOLVE / other visible transition
+HARD CUT / MATCH CUT / DISSOLVE / visible transition
 
 SHOT 02 — ...
 ```
@@ -254,17 +370,18 @@ SHOT 02 — ...
 Each shot **must** include the five contract parts. Optional analysis detail may fold into those parts:
 
 - composition → 起始画面 / 结束画面
-- subject performance/action → 主体动作
-- camera behavior → 摄影机运动
+- subject performance/action and action quality → 主体动作
+- camera behavior and visible frame effect → 摄影机运动
 - lighting/environment/material change → whichever part actually changes
 - graphics / PIP → 起始画面 and 结束画面, or a short extra line only when visible
+- temporal progression → 主体动作 / 摄影机运动 / 起始画面 / 结束画面 as appropriate
 - transition out → 镜头衔接
 
 Do not require every shot to contain every analysis category. Do not emit empty headings.
 
 ## Action Phase Compilation
 
-When physical action matters, preserve visible phases:
+When physical action matters, preserve visible phases when useful:
 
 ```text
 anticipation → initiation → execution → peak/impact → follow-through → recovery
@@ -272,11 +389,13 @@ anticipation → initiation → execution → peak/impact → follow-through →
 
 Useful language:
 
-- briefly shifts weight before moving
-- launches forward with a sudden acceleration
-- movement stays compact and controlled
+- briefly pauses before initiating the movement
+- shifts weight before moving
+- launches forward with sudden acceleration
+- keeps the movement compact and controlled
+- contact produces a visible recoil or material response
 - momentum carries the body laterally
-- the motion decelerates into a stable end pose
+- decelerates into a stable final pose
 
 Describe speed, weight, force and inertia only when visible.
 
@@ -293,42 +412,42 @@ Avoid unsupported:
 Prefer:
 
 ```text
-The camera smoothly tracks backward at matching speed, keeping the subject at a nearly constant medium scale while the road and roadside environment move rapidly through the background with strong forward parallax.
+The camera smoothly retreats at roughly matching pace, holding the subject at a nearly constant medium scale while the road and roadside environment travel rapidly through the background with strong forward parallax.
 ```
 
 If the exact technical movement is uncertain, describe what the frame does.
 
 ## Composition Compilation
 
-When composition is meaningful, express relationships rather than only coordinates.
+Express meaningful relationships rather than only coordinates.
 
 Example:
 
 ```text
-The woman carries slightly less visual weight on the left side of the frame, while the driver sits closer to camera on the right. The steering wheel and windshield create a lower/front frame, and the central rear-view mirror becomes a visual anchor between them, later carrying the pursuit information.
+The woman occupies the foreground-left with slightly greater scale, while the driver remains in the right midground. The steering wheel and windshield create an interior frame around them, and the rear-view mirror forms a compact secondary visual field that can carry information from the road behind.
 ```
 
-Do not turn this into a hard global constraint unless the reference truly depends on it.
+Do not automatically turn these observations into permanent global constraints.
 
 ## Lighting and Material Compilation
 
-Lighting should describe visible interaction:
+Lighting should describe interaction:
 
 ```text
-Hard sun enters from front-left, producing warm facial highlights and dense interior shadows; passing roadside shadows move rapidly across the skin and sunglasses.
+Warm sun enters from the side-front direction, producing narrow highlights on faces and sunglasses while much of the cabin remains in dense shadow; passing exterior shadows intermittently move across the interior.
 ```
 
 Material should describe surface character:
 
 ```text
-The faded red paint has a sun-aged, slightly desaturated finish with uneven reflections; the beige interior shows small creases and wear consistent with an older vehicle.
+The faded red paint has a sun-aged, slightly desaturated finish with uneven reflections; the beige interior carries fine creases, small scuffs and a dry aged texture.
 ```
 
 Use qualifiers such as “appears,” “slightly,” or “leather-like” when material identity is uncertain.
 
 ## Temporal Change Compilation
 
-Video prompts become stronger when “gradually” is unpacked.
+Unpack vague words such as “gradually.”
 
 Instead of:
 
@@ -339,7 +458,7 @@ The pursuit cars get closer.
 write:
 
 ```text
-They begin as tiny colored flashes deep in the mirror, then slowly grow in scale; the red-blue pulses become clearer through the heat distortion until the pursuit feels visibly closer and more threatening.
+They begin as tiny colored flashes deep in the mirror, then slowly increase in scale; the red-blue pulses become more recognizable through the heat distortion until their presence occupies noticeably more of the reflected road.
 ```
 
 Apply the same idea to:
@@ -348,7 +467,7 @@ Apply the same idea to:
 - focus
 - light
 - smoke
-- reflections
+- reflection
 - distance
 - speed
 - particles
@@ -365,6 +484,7 @@ Opening cast: 2 people.
 Woman: mid-20s, long black hair half-tied, faded red jacket over a white tee, small gold hoop earrings, seated left, looking into the rear-view mirror.
 Man: short sun-bleached hair, beige shirt, right hand on the wheel, sunglasses, seated right closer to camera.
 Same vehicle interior and desert-road geography; consistent hot golden daylight, faded warm color palette, realistic skin and aged-material texture throughout.
+SPACE CONTINUITY: when relevant, keep screen-left/right, world anchors, depth order, body orientation, eyelines, occlusion, camera side and 180-degree axis consistent across shots.
 ```
 
 Rules:
@@ -377,40 +497,36 @@ Rules:
 
 ## Recommended Audio Compilation
 
-Audio is normally an optional **recommended reference**, especially when source audio cannot be reliably verified.
+Audio is normally an optional **recommended reference** for the target video model or later sound design.
 
 Example:
 
 ```text
 RECOMMENDED AUDIO:
-Continuous engine, road and wind texture inside the moving car; subtle cabin vibration and fabric movement; distant pursuit sirens can gradually become more noticeable; restrained low tension in the score; tire/sand texture grows when the car leaves the paved road.
+Consider continuous vintage engine, road and wind texture inside the moving car; subtle cabin vibration and material creaks; restrained low tension during the mirror shot; a small metallic lighter click and ignition texture during the cigar action; near the final hand contact, reduce musical presence and let engine/road ambience carry the moment.
 ```
 
-Use language such as “recommended,” “suitable,” “consider,” or “can include” when appropriate.
-
-If the target model supports native audio, integrate compact audio cues into the relevant timeline. Otherwise return them as a separate optional sound-design block.
-
-Read `audio-inference-and-design.md` for details.
+Do not imply that these sounds are accurate source reconstruction unless reliable audio evidence exists.
 
 ## Style Compilation
 
-Do not rely on generic words such as:
+Avoid relying on generic words such as:
 
 - cinematic
 - beautiful
 - epic
 - high quality
 
-Translate them into visible properties:
+Translate style into visible properties:
 
 ```text
-sun-baked gold and faded red palette, fine restrained film grain, realistic skin texture, subtle highlight bloom, slightly aged surfaces, dense warm daylight and controlled handheld/vehicle vibration
+sun-baked gold and faded red palette, fine restrained film grain, realistic skin texture, subtle highlight bloom, sun-aged materials, dense warm daylight and controlled vehicle vibration
 ```
 
-If mixing historical art direction with modern image quality, separate them conceptually:
+When combining historical art direction with modern image quality, separate them conceptually:
 
 ```text
-1970s production design and color character, rendered with modern photorealistic skin/material detail.
+1970s production design and color character, rendered with modern photorealistic skin and material detail.
 ```
 
 ## Narrative Rhythm
@@ -418,13 +534,13 @@ If mixing historical art direction with modern image quality, separate them conc
 Encode pacing when it matters:
 
 ```text
-quiet observation → subtle suspicion → rising pursuit pressure → restrained interpersonal reaction → decisive final beat
+quiet observation → subtle suspicion → rising pursuit pressure → restrained interpersonal reaction → held final beat
 ```
 
 For montage:
 
 ```text
-rapid state-changing cuts, progressively tighter detail, each cut advances the process, followed by a longer final hold on the completed result
+rapid state-changing cuts, progressively tighter detail, each cut advances the process, followed by a longer final hold on the completed state
 ```
 
 ## Constraint Language
@@ -435,8 +551,8 @@ Useful:
 
 ```text
 Maintain the same character identities and vehicle interior across the sequence.
-Do not turn visible hard cuts into one continuous camera move.
-Do not invent dialogue when none is established.
+Preserve the visible hard cuts.
+Do not invent specific dialogue when none is established.
 ```
 
 Avoid huge generic negative-prompt lists or over-constraining every minor screen position.
@@ -488,12 +604,20 @@ Before returning:
 - If someone entered or left the frame, is that path written?
 - Can camera motion be split into task / start / path / speed / stop, or is it explicitly locked?
 - Does it explain important changes rather than only list properties?
-- Are emotions translated into visible acting when possible?
-- Are actions described with useful movement quality?
+- Are important emotions translated into visible acting?
+- Are important actions more than isolated verbs?
+- Does camera language explain visible frame behavior?
 - Are lighting/material/environment descriptions concrete and visual?
 - Are cuts preserved?
 - Is the continuity card written once, with a headcount and per-person lines?
+- For spatially sensitive shots, are screen coordinates, world anchors, depth, body orientation, eyelines, occlusion, camera side and axis explicit and consistent?
+- Are OTS/reverse/POV/reaction labels supported by concrete visible relations rather than used as magic constraints?
+- If the axis or screen direction changes, is the transition or new spatial segment stated?
 - Are unsupported technical precision, 8K, fps, and quality-switch words removed?
 - Are negatives 3–8 current risks, not a universal dump?
 - Is recommended audio clearly presented as reference rather than fact?
+- Are stable details consistent?
+- Is unsupported technical precision removed?
 - Is the result rich and professional without becoming rigid or over-constrained?
+
+If a Shot already answers the three professional questions clearly, do not keep expanding it. **Professional quality comes from precise visible process, not maximum word count.**

@@ -136,6 +136,20 @@ Analyze how elements are organized within the frame:
 
 Composition description should remain evidence-based and should not force every shot into a textbook composition category.
 
+## 5.5 Spatial Blocking and Continuity
+
+When more than one subject, a moving subject, a repeated location, or a dialogue coverage pattern is present, record a spatial contract rather than only composition coordinates:
+
+- screen-left / screen-right in the current shot;
+- stable world positions and background anchors;
+- foreground/midground/background and occlusion;
+- body orientation separately from eye direction;
+- camera position and camera side of the interaction or movement axis;
+- movement start, screen direction, destination and landmark order;
+- 180-degree axis and whether an axis crossing is visible or only uncertain.
+
+Use stable IDs such as A/B/C across the timeline. `A is on the left` is incomplete; write `A is screen-left foreground, closer to camera, beside the door in world space`. For OTS and reverse shots, identify whose shoulder is in the foreground and which off-screen direction the target occupies. Read `spatial-blocking-and-continuity.md` for the full card and QC rules.
+
 ## 6. Camera
 
 Analyze:

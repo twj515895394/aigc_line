@@ -19,6 +19,8 @@
 
 原图构图、光影和人物已经成立，只需要补皮肤微观纹理、去磨皮或提高有效分辨率时，也改用 `image-editing` 的保真细节增强，不要按整体改写处理。
 
+当整体改写目标是自然照片、去 AI 感、可信材质或降低商业精修感时，读取 `../../controls/realism-quality/index.md`；保留、改写和禁止继承的判断先于写实修饰。商业洁净展示或写实 CGI 不自动套用生活纪实瑕疵。
+
 ## 先判断改写强度
 
 ### 高保留
@@ -80,6 +82,7 @@
 - 参考冲突和保留强度：`../../controls/reference-handling/index.md`
 - 身份稳定：`../../controls/identity-consistency/index.md`
 - 镜头和构图：`../../controls/composition-camera/index.md`
+- 真实照片与去 AI 感：`../../controls/realism-quality/index.md`
 - 风格实现：`../../styles/index.md`
 
 ## 输出骨架

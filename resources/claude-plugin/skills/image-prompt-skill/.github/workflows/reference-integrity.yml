@@ -1,0 +1,66 @@
+name: Reference Integrity
+
+on:
+  pull_request:
+    paths:
+      - "README.md"
+      - "AGENTS.md"
+      - "SKILL.md"
+      - "references/**"
+      - "assets/templates/**"
+      - "docs/**"
+      - "scripts/check_reference_integrity.py"
+      - ".github/workflows/reference-integrity.yml"
+  push:
+    branches:
+      - main
+      - refactor/reference-architecture-v2
+    paths:
+      - "README.md"
+      - "AGENTS.md"
+      - "SKILL.md"
+      - "references/**"
+      - "assets/templates/**"
+      - "docs/**"
+      - "scripts/check_reference_integrity.py"
+      - ".github/workflows/reference-integrity.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Reference integrity check
+        id: integrity
+        shell: bash
+        run: |
+          set +e
+          python scripts/check_reference_integrity.py > reference-integrity-report.txt 2>&1
+          exit_code=$?
+          cat reference-integrity-report.txt
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload integrity report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reference-integrity-report
+          path: reference-integrity-report.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail when integrity check reports issues
+        if: steps.integrity.outputs.exit_code != '0'
+        run: exit 1
