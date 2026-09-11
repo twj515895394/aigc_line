@@ -65,7 +65,7 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 | `src/pages/` | 三个页面：HomePage（项目列表）、ProjectPage（工作区）、SettingsPage |
 | `src/stores/app.store.ts` | zustand 全局状态（当前项目、artifacts 等） |
 | `resources/comfyui-workflows/` | ComfyUI API 格式工作流 JSON 模板，打包时复制到 resourcesPath |
-| `resources/claude-plugin/` | 应用内置 Claude Plugin；Skill 放在其 `skills/<name>/SKILL.md`，打包后从 resourcesPath 直接加载。`image-prompt-skill` 与 `video-prompt-skill` 是 git submodule，分别跟踪 `https://github.com/twj515895394/image-prompt-skill` 与 `https://github.com/twj515895394/video-prompt-skill`；克隆需 `--recurse-submodules`，更新用 `git submodule update --remote` |
+| `resources/claude-plugin/` | 应用内置 Claude Plugin；Skill 放在其 `skills/<name>/SKILL.md`，打包后从 resourcesPath 直接加载。`image-prompt-skill`、`video-prompt-skill`、`inverse-video-prompt` 以普通文件随仓库跟踪（**不是 git submodule**），上游分别为 `https://github.com/twj515895394/image-prompt-skill`、`https://github.com/twj515895394/video-prompt-skill`、`https://github.com/twj515895394/InverseVideoPrompt-Skill`；升级时把上游工作树完整同步进对应 kebab-case 目录，并删除复制带入的嵌套 `.git` |
 | `docs/` | 文档截图（README 配图）；`docs/agents/` 为工程技能的问题追踪器、分类标签与领域文档配置 |
 | `test/` | vitest 单元测试 + `test/e2e/` Playwright 端到端测试 |
 | `dist/` `dist-electron/` `build/` | 构建产物，勿手改 |
@@ -173,7 +173,7 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 7. **路径安全**：上传媒体前校验路径必须位于项目目录内（`uploadReferenceMedia` 已有检查，新代码沿用）。
 8. **提交前验证**：`pnpm typecheck` 必须通过；`pnpm test`（vitest）不要跑挂；UI 改动大的话跑 `pnpm test:e2e`（Playwright）。
 9. **样式约定**：深色画布（`#0a0a0f` 底 + `#d4af37` 金强调色），Tailwind 原子类，跟随 CanvasArea 现有面板风格。聊天区按信息层级展示：用户/AI 正文和 Artifact 使用消息卡片，连续工具调用使用无头像的紧凑执行时间线，工具入参与结果默认折叠，避免长回合被低价值过程信息撑高。聊天产物卡片和项目内 Markdown 文件链接左键在资源管理器中显示该文件，右键可选「打开所在目录」；路径必须落在当前项目目录内。
-10. **内置 Skill 隔离**：内置 Skill 只能放在 `resources/claude-plugin/` 并通过 SDK `plugins` 加载；不要复制到项目 `.claude/skills`。新增 Skill 使用 kebab-case 目录名和包含 `name`、`description` 的 `SKILL.md`，并提升 `.claude-plugin/plugin.json` 版本。`image-prompt-skill` 与 `video-prompt-skill` 以 git submodule 引入，不要再把上游文件复制进本仓库；升级时更新 submodule 指针，不要直接改子模块工作树后当本仓库源文件提交。
+10. **内置 Skill 隔离**：内置 Skill 只能放在 `resources/claude-plugin/` 并通过 SDK `plugins` 加载；不要复制到项目 `.claude/skills`。新增 Skill 使用 kebab-case 目录名和包含 `name`、`description` 的 `SKILL.md`，并提升 `.claude-plugin/plugin.json` 版本。`image-prompt-skill`、`video-prompt-skill` 与 `inverse-video-prompt` 以上游同步的普通文件跟踪，**不是 git submodule**；升级时用上游工作树覆盖对应 kebab-case 目录（第三个 Skill 的目录名固定为 `inverse-video-prompt`，不要写成上游 clone 的 `InverseVideoPrompt-Skill`，否则会与本仓库既有同名 Skill 重复），复制后必须删除带入的嵌套 `.git` 再提交。
 11. **Skill 斜杠菜单**（Claude / Codex 按项目分别扫描目录）：`chat:listSkills` 扫描内置、项目和用户 Skill；活动 Query 的 `supportedCommands()` 只补充已发现 Skill 的元数据，不得把 `/clear`、`/batch` 等控制命令加入菜单。显式 `/<skill>` 必须保持在 Agent prompt 第一行；节点引用和附件上下文追加在命令之后。`disable-model-invocation: true` 的 Skill 仍出现在斜杠菜单，但不写入 Codex `developer_instructions` 的自动 Skill 列表；未显式斜杠不得自行读取或执行。
 12. **新建上下文**：Codex 在空闲时清除其恢复 ID，下一轮用 SDK 新建 Thread，保留历史和画布；Claude 通过 `chat:clearContext` 向 SDK 发送隐藏的 `/clear`，仅在 Agent 空闲时允许执行；吞掉该命令的 `(no content)`，完成后追加并持久化 `event: 'context-cleared'` 分界消息。不要自动删除聊天历史、画布或项目文件。
 13. **旁白视频生成门**：`voiceover-to-video` 必须在实际生成图片、视频前分别询问并等待用户明确同意，重做也要重新确认；系统实际提交的图片提示词必须使用中文；每个视频提示词必须包含覆盖完整时长的一个或多个连续子分镜，默认优先可执行的单一连续 Shot，只有新增信息、关键反应或空间关系变化时才切镜；禁止 BGM，但可生成不遮盖原旁白的同步环境音和拟音。视频生成后只核对节点状态和 `sourcePath`，不自动执行质量审核。
