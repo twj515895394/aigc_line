@@ -7,10 +7,14 @@ import type {
   GenerateVideoRequest,
   GenerateVideoResult,
   ImageAspectRatio,
+  VideoAspectRatio,
 } from '../../../src/shared/ipc.types'
 import { parseOpenAiModelList, type ReverseProxyModel } from '../../../src/shared/reverse-proxy-models'
 import { normalizeOpenAiCompatibleBaseUrl } from '../../../src/shared/reverse-proxy-url'
-import { GPT_GROK_IMAGE_PREFIX, GPT_GROK_VIDEO_PREFIX, parsePrefixedWorkflowId } from '../../../src/shared/reverse-proxy-workflows'
+import { GPT_GROK_IMAGE_PREFIX, GPT_GROK_VIDEO_PREFIX, imageWorkflowReferenceLimit, parsePrefixedWorkflowId } from '../../../src/shared/reverse-proxy-workflows'
+import { reverseProxyImageCall } from '../../../src/shared/reverse-proxy-image'
+import { extractOpenAiImageBase64 } from '../../../src/shared/gpt-image-call'
+import { buildReverseProxyImageRequest, loadOpenAiReferenceImages } from './reverse-proxy-image'
 import { downloadMediaToFile } from './media-io'
 import { loadProject } from './project.store'
 import { retryGenerationRead, runGenerationTask, runLocalGeneration, TerminalGenerationError } from './generation-task.service'
@@ -101,24 +105,13 @@ function openAiImageSize(aspectRatio: ImageAspectRatio): string {
   return '1536x1024'
 }
 
-function grokVideoSize(aspectRatio: ImageAspectRatio): string {
+function grokVideoSize(aspectRatio: ImageAspectRatio | VideoAspectRatio): string {
   if (aspectRatio === '9:16') return '720x1280'
   if (aspectRatio === '4:3') return '960x720'
+  if (aspectRatio === '3:4') return '720x960'
   if (aspectRatio === '1:1') return '720x720'
   return '1280x720'
 }
-
-function extractOpenAiImageBase64(payload: unknown): string {
-  if (!payload || typeof payload !== 'object' || !('data' in payload) || !Array.isArray(payload.data)) {
-    throw new TerminalGenerationError('GPT / Grok 反代未返回图片数据')
-  }
-  const first = payload.data[0]
-  if (!first || typeof first !== 'object') throw new TerminalGenerationError('GPT / Grok 反代未返回图片数据')
-  const b64 = 'b64_json' in first && typeof first.b64_json === 'string' ? first.b64_json : ''
-  if (!b64) throw new TerminalGenerationError('GPT / Grok 反代未返回 b64 图片')
-  return b64
-}
-
 function readString(value: object, key: string): string {
   if (!(key in value)) return ''
   const field = Reflect.get(value, key)
@@ -183,19 +176,23 @@ export async function generateImageWithGptGrok(request: GenerateImageRequest): P
 
   return runLocalGeneration({ project, provider: 'gpt-grok', request }, async (markSubmitting) => {
     const baseUrl = normalizeOpenAiCompatibleBaseUrl(settings.gptGrokBaseUrl)
+    const references = await loadOpenAiReferenceImages(project.folderPath, request, {
+      maxCount: imageWorkflowReferenceLimit(request.workflowId),
+      maxBytes: 20 * 1024 * 1024,
+      label: 'GPT / Grok 反代',
+    })
+    const call = reverseProxyImageCall({
+      model: modelId,
+      prompt,
+      size: openAiImageSize(request.aspectRatio),
+      references,
+    })
     markSubmitting()
-    const response = await fetch(`${baseUrl}/images/generations`, {
+    const { headers, body } = buildReverseProxyImageRequest(call, settings.gptGrokApiKey)
+    const response = await fetch(`${baseUrl}${call.path}`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${settings.gptGrokApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: modelId,
-        prompt,
-        n: 1,
-        size: openAiImageSize(request.aspectRatio),
-      }),
+      headers,
+      body,
       signal: AbortSignal.timeout(5 * 60_000),
     })
     const text = await response.text()
@@ -203,13 +200,18 @@ export async function generateImageWithGptGrok(request: GenerateImageRequest): P
     try {
       payload = text.trim() ? JSON.parse(text) as unknown : {}
     } catch {
-      throw new Error(`GPT / Grok 反代生图返回了无效响应（HTTP ${response.status}）`)
+      payload = {}
     }
     if (!response.ok) {
-      throw new TerminalGenerationError(`GPT / Grok 反代生图失败（HTTP ${response.status}）：${text.slice(0, 500)}`)
+      const err = payload && typeof payload === 'object' && 'error' in payload ? payload.error : text.slice(0, 500)
+      throw new TerminalGenerationError(`GPT / Grok 反代生图失败（HTTP ${response.status}）：${typeof err === 'string' ? err : JSON.stringify(err).slice(0, 500)}`)
     }
-    const bytes = Buffer.from(extractOpenAiImageBase64(payload), 'base64')
-    if (!bytes.length) throw new Error('GPT / Grok 反代返回了空图片')
+    if (!text.trim() || (payload && typeof payload === 'object' && !('data' in payload))) {
+      throw new TerminalGenerationError(`GPT / Grok 反代生图返回了无效响应（HTTP ${response.status}）`)
+    }
+    const b64 = extractOpenAiImageBase64(payload)
+    if (!b64) throw new TerminalGenerationError('GPT / Grok 反代未返回图片数据')
+    const bytes = Buffer.from(b64, 'base64')
     const safeNodeId = request.nodeId.replace(/[^a-zA-Z0-9_-]/g, '-').slice(-48)
     const outputDir = path.join(project.folderPath, 'generated', 'images')
     await fs.mkdir(outputDir, { recursive: true })

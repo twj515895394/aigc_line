@@ -41,6 +41,9 @@ describe('director indoor and architectural elements', () => {
     const addDescription = actions.find((action) => action.id === 'add-element')!.description!
     const draftDescription = actions.find((action) => action.id === 'apply-scene-draft')!.description!
     const systemPrompt = buildSystemPromptAppend('project')
+    expect(systemPrompt).toContain('review-scene')
+    expect(systemPrompt).toContain('capture-still')
+    expect(systemPrompt).toContain('export-video')
     const draft = directorSceneDraftSchema.parse({
       summary: '带门窗、客厅、卧室和护栏的室内场景',
       elements: interiorKinds.map((kind, index) => {

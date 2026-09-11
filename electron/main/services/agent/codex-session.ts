@@ -71,9 +71,9 @@ class CodexSession {
   }
 
   sendNow(messageId: string): void {
-    if (this.stopping) throw new Error('正在中断当前回合，请稍候');
+    if (this.stopping) return
     const index = this.queue.findIndex(message => message.id === messageId);
-    if (index < 0) throw new Error('该消息已开始处理或已不在队列中');
+    if (index < 0) return
     const [message] = this.queue.splice(index, 1);
     this.queue.unshift(message);
     this.priorityMessageId = messageId;
@@ -143,12 +143,13 @@ class CodexSession {
     this.bridge = await startCanvasMcpBridge(this.options.projectId, this.options.folderPath, () => this.running && !this.stopping);
     const runtime = await getNetworkCodexRuntime();
     const skills = await scanAvailableSkills(this.options.folderPath, 'codex');
-    const skillInstructions = skills.map(skill => `- ${skill.name}: ${skill.description}\n  ${skill.path}`).join('\n');
+    const autoSkills = skills.filter((skill) => !skill.disableModelInvocation);
+    const skillInstructions = autoSkills.map(skill => `- ${skill.name}: ${skill.description}\n  ${skill.path}`).join('\n');
     const codex = new Codex({
       codexPathOverride: runtime.executablePath,
       env: { ...runtime.env, AIGC_CANVAS_MCP_TOKEN: this.bridge.token },
       config: {
-        developer_instructions: `${buildSystemPromptAppend(this.options.folderPath)}\n\n你使用 Codex。Read/Bash/Edit 是通用操作描述，请使用实际可用的文件、终端和图片工具。画布工具由 aigc_canvas MCP 提供。需要用户决定时在聊天中提问。以下 Skill 位于应用或用户目录，使用前读取对应 SKILL.md，按需读取相对引用；不要向项目复制 Skill。\n${skillInstructions}`,
+        developer_instructions: `${buildSystemPromptAppend(this.options.folderPath)}\n\n你使用 Codex。Read/Bash/Edit 是通用操作描述，请使用实际可用的文件、终端和图片工具。画布工具由 aigc_canvas MCP 提供。需要用户决定时在聊天中提问。以下 Skill 位于应用或用户目录，使用前读取对应 SKILL.md，按需读取相对引用；不要向项目复制 Skill。仅斜杠菜单手动唤起的 Skill 不会出现在此列表，未显式 /命令时不要自行读取或执行它们。\n${skillInstructions}`,
         mcp_servers: { aigc_canvas: { url: this.bridge.url, bearer_token_env_var: 'AIGC_CANVAS_MCP_TOKEN', required: true } },
       },
     });

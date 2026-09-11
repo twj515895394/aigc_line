@@ -12,7 +12,10 @@ import type {
 } from '../../../src/shared/ipc.types'
 import { parseOpenAiModelList } from '../../../src/shared/reverse-proxy-models'
 import { normalizeOpenAiCompatibleBaseUrl } from '../../../src/shared/reverse-proxy-url'
-import { GEMINI_PROXY_IMAGE_PREFIX, parsePrefixedWorkflowId } from '../../../src/shared/reverse-proxy-workflows'
+import { GEMINI_PROXY_IMAGE_PREFIX, imageWorkflowReferenceLimit, parsePrefixedWorkflowId } from '../../../src/shared/reverse-proxy-workflows'
+import { reverseProxyImageCall } from '../../../src/shared/reverse-proxy-image'
+import { extractOpenAiImageBase64 } from '../../../src/shared/gpt-image-call'
+import { buildReverseProxyImageRequest, loadOpenAiReferenceImages } from './reverse-proxy-image'
 import { loadProject } from './project.store'
 import { runLocalGeneration, TerminalGenerationError } from './generation-task.service'
 import { getRuntimeSettings } from './settings.service'
@@ -95,17 +98,6 @@ function openAiImageSize(aspectRatio: ImageAspectRatio): string {
   return '1536x1024'
 }
 
-function extractOpenAiImageBase64(payload: unknown): string {
-  if (!payload || typeof payload !== 'object' || !('data' in payload) || !Array.isArray(payload.data)) {
-    throw new TerminalGenerationError('Gemini 反代未返回图片数据')
-  }
-  const first = payload.data[0]
-  if (!first || typeof first !== 'object') throw new TerminalGenerationError('Gemini 反代未返回图片数据')
-  const b64 = 'b64_json' in first && typeof first.b64_json === 'string' ? first.b64_json : ''
-  if (!b64) throw new TerminalGenerationError('Gemini 反代未返回 b64 图片')
-  return b64
-}
-
 export async function generateImageWithGeminiProxy(request: GenerateImageRequest): Promise<GenerateImageResult> {
   const project = await loadProject(request.projectId)
   if (!project) throw new Error('项目不存在或已被删除')
@@ -122,19 +114,23 @@ export async function generateImageWithGeminiProxy(request: GenerateImageRequest
 
   return runLocalGeneration({ project, provider: 'gemini-proxy', request }, async (markSubmitting) => {
     const baseUrl = normalizeOpenAiCompatibleBaseUrl(settings.geminiBaseUrl)
+    const references = await loadOpenAiReferenceImages(project.folderPath, request, {
+      maxCount: imageWorkflowReferenceLimit(request.workflowId),
+      maxBytes: 20 * 1024 * 1024,
+      label: 'Gemini 反代',
+    })
+    const call = reverseProxyImageCall({
+      model: modelId,
+      prompt,
+      size: openAiImageSize(request.aspectRatio),
+      references,
+    })
     markSubmitting()
-    const response = await fetch(`${baseUrl}/images/generations`, {
+    const { headers, body } = buildReverseProxyImageRequest(call, settings.geminiApiKey)
+    const response = await fetch(`${baseUrl}${call.path}`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${settings.geminiApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: modelId,
-        prompt,
-        n: 1,
-        size: openAiImageSize(request.aspectRatio),
-      }),
+      headers,
+      body,
       signal: AbortSignal.timeout(5 * 60_000),
     })
     const text = await response.text()
@@ -142,14 +138,18 @@ export async function generateImageWithGeminiProxy(request: GenerateImageRequest
     try {
       payload = text.trim() ? JSON.parse(text) as unknown : {}
     } catch {
-      throw new Error(`Gemini 反代生图返回了无效响应（HTTP ${response.status}）`)
+      payload = {}
     }
     if (!response.ok) {
       const err = payload && typeof payload === 'object' && 'error' in payload ? payload.error : text.slice(0, 500)
       throw new TerminalGenerationError(`Gemini 反代生图失败（HTTP ${response.status}）：${typeof err === 'string' ? err : JSON.stringify(err).slice(0, 500)}`)
     }
-    const bytes = Buffer.from(extractOpenAiImageBase64(payload), 'base64')
-    if (!bytes.length) throw new Error('Gemini 反代返回了空图片')
+    if (!text.trim() || (payload && typeof payload === 'object' && !('data' in payload))) {
+      throw new TerminalGenerationError(`Gemini 反代生图返回了无效响应（HTTP ${response.status}）`)
+    }
+    const b64 = extractOpenAiImageBase64(payload)
+    if (!b64) throw new TerminalGenerationError('Gemini 反代未返回图片数据')
+    const bytes = Buffer.from(b64, 'base64')
     const safeNodeId = request.nodeId.replace(/[^a-zA-Z0-9_-]/g, '-').slice(-48)
     const outputDir = path.join(project.folderPath, 'generated', 'images')
     await fs.mkdir(outputDir, { recursive: true })

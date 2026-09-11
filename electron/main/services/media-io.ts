@@ -25,7 +25,7 @@ export async function assertMediaFileSize(filePath: string, maxBytes: number, la
   if (stat.size <= 0 || stat.size > maxBytes) throw new Error(`${label}大小必须在 1 字节到 ${Math.round(maxBytes / 1024 / 1024)} MB 之间`)
   return stat.size
 }
-export async function readBoundedMedia(filePath: string, maxBytes: number, label: string): Promise<Buffer> {
+export async function readBoundedMedia(filePath: string, maxBytes: number, label: string): Promise<Buffer<ArrayBuffer>> {
   await assertMediaFileSize(filePath, maxBytes, label)
   const file = await fs.open(filePath, 'r')
   try {

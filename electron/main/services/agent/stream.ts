@@ -46,3 +46,26 @@ export function extractMessageText(message: unknown): string | null {
 
   return null;
 }
+
+/** Anthropic API message.id, then SDK uuid. Null if this is not an assistant frame. */
+export function extractAssistantMessageId(message: unknown): string | null {
+  if (!message || typeof message !== 'object') return null;
+  const msg = message as Record<string, unknown>;
+  if (msg.type !== 'assistant') return null;
+  if (msg.message && typeof msg.message === 'object') {
+    const id = (msg.message as Record<string, unknown>).id;
+    if (typeof id === 'string' && id) return id;
+  }
+  return typeof msg.uuid === 'string' && msg.uuid ? msg.uuid : null;
+}
+
+/**
+ * Same API message can arrive as duplicate frames or extra text blocks.
+ * undefined = keep the previous content (no write).
+ */
+export function mergeAssistantText(previous: string | undefined, next: string): string | undefined {
+  if (previous === undefined) return next;
+  if (next === previous || previous.startsWith(next)) return undefined;
+  if (next.startsWith(previous)) return next;
+  return `${previous}${next}`;
+}

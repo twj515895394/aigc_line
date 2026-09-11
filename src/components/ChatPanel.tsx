@@ -59,7 +59,10 @@ export function ChatPanel() {
     try {
       await window.electronAPI.sendCodexQueuedNow(projectId, messageId)
     } catch (error) {
-      if (useAppStore.getState().currentProject === currentProject) setSendError(error instanceof Error ? error.message : String(error))
+      if (useAppStore.getState().currentProject === currentProject) {
+        const raw = error instanceof Error ? error.message : String(error)
+        setSendError(raw.replace(/^Error invoking remote method '[^']+': Error:\s*/, ''))
+      }
     } finally { if (useAppStore.getState().currentProject === currentProject) setSendingNow(null) }
   }
   const toolStepCount = useMemo(() => visibleMessages.reduce((count, message) => count + (message.toolCall ? 1 : 0), 0), [visibleMessages])
@@ -169,6 +172,15 @@ export function ChatPanel() {
           // remove its first row and shift the reader's position.
           readingStartIdRef.current = shouldStickToBottomRef.current ? null : displayedMessages[0]?.id ?? null
         }}
+        onClickCapture={(event) => {
+          const target = event.target instanceof Element ? event.target : null
+          const clickable = target?.closest('a,button')
+          console.info('[reveal-in-folder] chat click', {
+            tag: (target as HTMLElement | null)?.tagName,
+            href: clickable instanceof HTMLAnchorElement ? clickable.getAttribute('href') : null,
+            text: clickable?.textContent?.slice(0, 80) ?? target?.textContent?.slice(0, 80),
+          })
+        }}
         className="flex-1 overflow-y-auto p-3"
       >
         {chatHistoryError && (
@@ -218,7 +230,14 @@ export function ChatPanel() {
                     <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#8a8794]" />
                   </div>
                   <button
-                    onClick={() => currentProject && void window.electronAPI.interruptAgent(currentProject.id)}
+                    onClick={() => {
+                      if (!currentProject) return
+                      void window.electronAPI.interruptAgent(currentProject.id).catch((error) => {
+                        if (useAppStore.getState().currentProject === currentProject) {
+                          setSendError(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': Error:\s*/, '') : String(error))
+                        }
+                      })
+                    }}
                     className="ml-1 rounded-md border border-white/10 px-2 py-0.5 text-[10px] text-[#8a8794] transition hover:border-rose-400/40 hover:text-rose-300"
                     title={currentProject?.agent?.provider === 'codex' ? '停止当前回合并清空待发送队列' : '打断当前回合（已排队的消息仍会执行）'}
                   >

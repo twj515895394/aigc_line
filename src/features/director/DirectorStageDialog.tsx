@@ -54,8 +54,17 @@ import { DirectorAssetLibrary } from './DirectorAssetLibrary'
 import { registerEditFlusher } from '../../shared/pending-edits'
 import { createDirectorHistory, moveDirectorHistory, recordDirectorEdit } from './director-history'
 import { boundedExportWait, encodeDirectorWebM } from './director-video-export'
+import { DIRECTOR_EXPORT_CLOSED_ERROR, isDirectorRendererUsable, scheduleDirectorDialogUnmountCleanup, shouldRemountDirectorRenderer } from './director-export-request'
+import { describeDirectorAgentHud } from './director-agent-status'
 
 type ViewMode = 'director' | 'camera'
+
+export type DirectorStageRequest = {
+  id: string
+  type: 'capture-still' | 'export-video'
+  shotId?: string
+  frame?: number
+}
 
 interface DirectorStageDialogProps {
   project: DirectorProject
@@ -65,7 +74,12 @@ interface DirectorStageDialogProps {
   onExportVideo: (webmData: ArrayBuffer, shot: DirectorShot, project: DirectorProject) => Promise<string>
   referenceImages: Array<{ nodeId: string; title: string; sourcePath: string; preview?: string }>
   agentBusy: boolean
+  generationStatus?: 'idle' | 'generating' | 'error'
+  generationError?: string
+  runningTool?: { toolName: string; toolInput: string } | null
   onRequestAgentScene: (reference: { nodeId: string; title: string; sourcePath: string }, instruction: string) => Promise<void>
+  request?: DirectorStageRequest | null
+  onRequestSettled?: (requestId: string, result: { ok: true; relativePath: string } | { ok: false; error: string }) => void
 }
 
 const clone = <T,>(value: T): T => structuredClone(value)
@@ -556,7 +570,6 @@ type ReadyFrame = { frame: number; requestId: number; render: () => HTMLCanvasEl
 function FrameCaptureBridge({ frame, requestId, ready }: { frame: number; requestId: number; ready: RefObject<ReadyFrame | null> }) {
   const state = useThree()
   useLayoutEffect(() => {
-    if (!state.camera.userData.directorCamera) return
     const value = { frame, requestId, render: () => {
       state.scene.updateMatrixWorld(true)
       state.gl.render(state.scene, state.camera)
@@ -722,7 +735,7 @@ function VectorFields({ label, value, disabled = false, onChange }: { label: str
   )
 }
 
-export function DirectorStageDialog({ project, onChange, onClose, onCapture, onExportVideo, referenceImages, agentBusy, onRequestAgentScene }: DirectorStageDialogProps) {
+export function DirectorStageDialog({ project, onChange, onClose, onCapture, onExportVideo, referenceImages, agentBusy, generationStatus, generationError, runningTool, onRequestAgentScene, request, onRequestSettled }: DirectorStageDialogProps) {
   const [draft, setDraft] = useState<DirectorProject>(() => normalizeDirectorProject(clone(project), project?.name))
   const [autoSaveState, setAutoSaveState] = useState<'saved' | 'pending' | 'saving' | 'error'>('saved')
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState<number | null>(null)
@@ -766,6 +779,7 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
   const transformingElementIdRef = useRef<string | null>(null)
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null)
   const [frameRect, setFrameRect] = useState<DirectorCropRect | null>(null)
+  const [canvasKey, setCanvasKey] = useState(0)
   const directorCameraRef = useRef<{ position: DirectorVec3; target: DirectorVec3; fov: number }>({
     position: vec3(7, 5, 9),
     target: vec3(0, 1, 0),
@@ -777,6 +791,12 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
   const playbackRunRef = useRef(0)
   const pressedMoveKeysRef = useRef(new Set<string>())
   const mouseLookRef = useRef({ dragging: false, x: 0, y: 0 })
+  const captureRef = useRef<(options?: { shotId?: string; frame?: number }) => Promise<string | undefined>>(async () => undefined)
+  const exportVideoRef = useRef<(options?: { shotId?: string }) => Promise<string | undefined>>(async () => undefined)
+  const onRequestSettledRef = useRef(onRequestSettled)
+  onRequestSettledRef.current = onRequestSettled
+  const requestRef = useRef(request)
+  requestRef.current = request
 
   useEffect(() => {
     if (referenceImages.some((image) => image.nodeId === sceneReferenceNodeId)) return
@@ -814,6 +834,16 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
   const displayFrame = Math.min(maxFrame, Math.max(0, Math.floor(currentFrame + 1e-6)))
   const playheadKeyframe = activeShot?.cameraKeyframes.find((keyframe) => keyframe.frame === currentFrame)
   const busy = capturing || exporting || closing
+  const agentHud = describeDirectorAgentHud({
+    agentBusy,
+    request,
+    capturing,
+    exporting,
+    exportProgress,
+    generationStatus,
+    generationError,
+    runningTool,
+  })
   currentFrameRef.current = currentFrame
   if (displayedCamera) cameraControlViewRef.current = displayedCamera
   const selected = draft.elements.find((element) => element.id === selectedId)
@@ -1135,7 +1165,16 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
   useEffect(() => {
     aliveRef.current = true
     const unregister = registerEditFlusher(() => flushDraftRef.current(), 10)
-    return () => { unregister(); aliveRef.current = false; exportAbortRef.current?.abort(new Error('导演台已关闭')) }
+    return () => {
+      unregister()
+      aliveRef.current = false
+      glRef.current = null
+      scheduleDirectorDialogUnmountCleanup(() => aliveRef.current, () => {
+        const pending = requestRef.current
+        if (pending) onRequestSettledRef.current?.(pending.id, { ok: false, error: DIRECTOR_EXPORT_CLOSED_ERROR })
+        exportAbortRef.current?.abort(new Error(DIRECTOR_EXPORT_CLOSED_ERROR))
+      })
+    }
   }, [])
 
   useEffect(() => {
@@ -1371,35 +1410,71 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
     })(), signal, 15_000)
   }
 
-  const capture = async () => {
-    if (!activeShot || !glRef.current || busy) return
+  const waitForRenderer = async (signal: AbortSignal, timeoutMs = 20_000) => {
+    const started = Date.now()
+    let remounts = 0
+    while (!isDirectorRendererUsable(glRef.current)) {
+      signal.throwIfAborted()
+      if (Date.now() - started > timeoutMs) throw new Error('导演台 3D 渲染器未就绪')
+      if (remounts < 3 && shouldRemountDirectorRenderer(glRef.current)) {
+        remounts += 1
+        glRef.current = null
+        readyFrameRef.current = null
+        setCanvasElement(null)
+        setCanvasKey((key) => key + 1)
+      }
+      const { promise, resolve } = Promise.withResolvers<void>()
+      setTimeout(resolve, 50)
+      await promise
+    }
+  }
+
+  const capture = async (options?: { shotId?: string; frame?: number }) => {
+    const requested = !!options
+    if (!requested && (!activeShot || busy)) return
+    if (requested && busy) throw new Error('导演台正忙，请稍后再导出构图')
     setCaptureError('')
     setIsPlaying(false)
     setViewMode('camera')
-    setCapturing(true)
     const controller = new AbortController()
     exportAbortRef.current = controller
     try {
-      await flushDraftRef.current()
+      await waitForRenderer(controller.signal)
+      if (!aliveRef.current) throw new Error(DIRECTOR_EXPORT_CLOSED_ERROR)
+      setCapturing(true)
+      if (options?.shotId) {
+        if (!draftRef.current.shots.some((shot) => shot.id === options.shotId)) throw new Error(`找不到 Shot：${options.shotId}`)
+        mutate((current) => activateDirectorShot(current, options.shotId!), false)
+      }
       const projectToCapture = draftRef.current
       const shotToCapture = projectToCapture.shots.find((shot) => shot.id === projectToCapture.activeShotId)
       if (!shotToCapture) throw new Error('当前 Shot 不存在')
+      if (options?.frame != null && Number.isFinite(options.frame)) {
+        const nextFrame = Math.max(0, Math.min(directorMaxFrame(shotToCapture, projectToCapture.fps), Math.floor(options.frame)))
+        currentFrameRef.current = nextFrame
+        setCurrentFrame(nextFrame)
+      }
+      await flushDraftRef.current()
       const canvas = await renderExactFrame(Math.floor(currentFrameRef.current), controller.signal)
       const dataUrl = cropCanvas(canvas, shotToCapture.aspectRatio)
-      const path = await onCapture(dataUrl, shotToCapture, projectToCapture)
+      const path = await onCapture(dataUrl, shotToCapture, draftRef.current)
       controller.signal.throwIfAborted()
       mutate((current) => ({ ...current, shots: current.shots.map((shot) => shot.id === shotToCapture.id ? { ...shot, lastCapturePath: path } : shot) }), false)
       if (!await persistDirectorDraft(draftRef.current)) throw new Error('构图已导出，但工程保存失败，请重试保存')
+      return path
     } catch (error) {
       setCaptureError(error instanceof Error ? error.message : String(error))
+      if (requested) throw error
     } finally {
       controller.abort()
       if (aliveRef.current) setCapturing(false)
     }
   }
 
-  const exportVideo = async () => {
-    if (!activeShot || !glRef.current || busy) return
+  const exportVideo = async (options?: { shotId?: string }) => {
+    const requested = !!options
+    if (!requested && (!activeShot || busy)) return
+    if (requested && busy) throw new Error('导演台正忙，请稍后再导出预演视频')
     window.dispatchEvent(new Event(FLUSH_TRANSFORMS_EVENT))
     commitControlledCamera()
     setCaptureError('')
@@ -1407,16 +1482,22 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
     setSelectedId(null)
     setViewMode('camera')
     setCurrentFrame(0)
-    setExporting(true)
     const controller = new AbortController()
     exportAbortRef.current = controller
     const previousFrame = currentFrame
     try {
-      if (activeShot.durationSec > 60) throw new Error('单次预演视频最长支持 60 秒')
+      await waitForRenderer(controller.signal)
+      if (!aliveRef.current) throw new Error(DIRECTOR_EXPORT_CLOSED_ERROR)
+      setExporting(true)
+      if (options?.shotId) {
+        if (!draftRef.current.shots.some((shot) => shot.id === options.shotId)) throw new Error(`找不到 Shot：${options.shotId}`)
+        mutate((current) => activateDirectorShot(current, options.shotId!), false)
+      }
       await flushDraftRef.current()
       const projectToExport = draftRef.current
       const shotToExport = projectToExport.shots.find((shot) => shot.id === projectToExport.activeShotId)
       if (!shotToExport) throw new Error('当前 Shot 不存在')
+      if (shotToExport.durationSec > 60) throw new Error('单次预演视频最长支持 60 秒')
       const sourceCanvas = await renderExactFrame(0, controller.signal)
       const crop = directorCropRect(sourceCanvas.width, sourceCanvas.height, shotToExport.aspectRatio)
       const scale = Math.min(1, 1920 / Math.max(crop.width, crop.height))
@@ -1437,14 +1518,41 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
         onProgress: (completed, total) => setExportProgress({ completed, total }),
       })
       controller.signal.throwIfAborted()
-      await onExportVideo(webmData, shotToExport, projectToExport)
+      const path = await onExportVideo(webmData, shotToExport, projectToExport)
+      return path
     } catch (error) {
       setCaptureError(error instanceof Error ? error.message : String(error))
+      if (requested) throw error
     } finally {
       controller.abort()
       if (aliveRef.current) { setIsPlaying(false); setExporting(false); setCurrentFrame(previousFrame) }
     }
   }
+
+  captureRef.current = capture
+  exportVideoRef.current = exportVideo
+
+  useEffect(() => {
+    if (!request) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const relativePath = request.type === 'capture-still'
+          ? await captureRef.current({ shotId: request.shotId, frame: request.frame })
+          : await exportVideoRef.current({ shotId: request.shotId })
+        if (cancelled) return
+        if (!relativePath) throw new Error('导演台导出没有返回产物路径')
+        onRequestSettledRef.current?.(request.id, { ok: true, relativePath })
+      } catch (error) {
+        if (cancelled) return
+        onRequestSettledRef.current?.(request.id, { ok: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    })()
+    return () => {
+      cancelled = true
+      exportAbortRef.current?.abort(new Error('导演台导出请求已更新'))
+    }
+  }, [request])
 
   const saveAndClose = async () => {
     if (busy || issues.length > 0) return
@@ -1459,7 +1567,7 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
       {busy && <div className="app-no-drag fixed inset-x-0 bottom-0 top-10 z-[210] flex cursor-progress items-center justify-center bg-black/15" aria-label={exporting ? '正在导出预演视频，编辑已暂停' : '正在保存，编辑已暂停'}>
         {exporting && <div className="rounded-xl border border-white/20 bg-[#15171f] p-5 text-center shadow-xl"><p className="text-sm">正在导出 {exportProgress.completed}/{exportProgress.total} 帧</p><button onClick={() => exportAbortRef.current?.abort(new Error('已取消导出'))} className="mt-3 rounded-lg border border-white/25 px-4 py-2 text-xs">取消导出</button></div>}
       </div>}
-      <header className="pointer-events-auto relative z-30 flex min-h-14 flex-shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-[#121318] px-3 py-2">
+      <header className="pointer-events-auto relative z-[220] flex min-h-14 flex-shrink-0 flex-wrap items-center gap-2 border-b border-white/10 bg-[#121318] px-3 py-2">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#d4af37]/15 text-[#e8c766]">◫</div>
         <div>
           <p className="text-sm font-semibold tracking-wide">3D 导演台</p>
@@ -1496,6 +1604,20 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
           <button onClick={() => void saveAndClose()} disabled={busy || issues.length > 0} className="rounded-lg bg-[#e8e6df] px-4 py-2 text-[11px] font-semibold text-[#17171b] disabled:opacity-40">{closing ? '正在保存…' : '保存并关闭'}</button>
         </div>
       </header>
+      <div
+        role="status"
+        className={`relative z-[220] flex min-h-10 flex-shrink-0 items-center gap-2 border-b px-3 py-2 text-[13px] ${
+          agentHud.tone === 'active'
+            ? 'border-[#d4af37]/40 bg-[#d4af37] font-semibold text-[#17171b]'
+            : agentHud.tone === 'error'
+              ? 'border-rose-400/40 bg-rose-500/90 font-semibold text-white'
+              : 'border-white/10 bg-[#15171f] text-white/55'
+        }`}
+      >
+        {agentHud.tone === 'active' && <span className="h-3.5 w-3.5 flex-none animate-spin rounded-full border-2 border-[#17171b]/25 border-t-[#17171b]" />}
+        <span>{agentHud.title}</span>
+        {agentHud.detail && <span className={agentHud.tone === 'idle' ? 'truncate text-white/35' : 'truncate font-medium opacity-80'}>{agentHud.detail}</span>}
+      </div>
 
       <div className="flex min-h-0 flex-1">
         {leftPanelOpen && <aside className="flex w-64 flex-shrink-0 flex-col border-r border-white/10 bg-[#121318]">
@@ -1576,14 +1698,23 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
 
         <main className="relative z-0 isolate min-w-0 flex-1 bg-[#0b0c10]">
           <Canvas
-            shadows
+            key={canvasKey}
+            dpr={1}
+            shadows={{ type: THREE.PCFShadowMap }}
             camera={{ position: [7, 5, 9], fov: 48 }}
-            gl={{ antialias: true, preserveDrawingBuffer: true }}
+            gl={{ antialias: true, preserveDrawingBuffer: true, powerPreference: 'default', failIfMajorPerformanceCaveat: false }}
             onCreated={({ gl, camera }) => {
               glRef.current = gl
               gl.domElement.tabIndex = 0
               setCanvasElement(gl.domElement)
               camera.lookAt(0, 1, 0)
+              gl.domElement.addEventListener('webglcontextlost', () => {
+                if (glRef.current !== gl) return
+                glRef.current = null
+                readyFrameRef.current = null
+                setCanvasElement(null)
+                setCanvasKey((key) => key + 1)
+              }, { once: true })
             }}
             onPointerMissed={() => {
               if (transformingElementIdRef.current) return
@@ -1593,10 +1724,10 @@ export function DirectorStageDialog({ project, onChange, onClose, onCapture, onE
           >
             <color attach="background" args={[draft.backgroundColor]} />
             <ambientLight intensity={1.25} />
-            <directionalLight position={[6, 10, 8]} intensity={2.1} castShadow shadow-mapSize={[2048, 2048]} />
+            <directionalLight position={[6, 10, 8]} intensity={2.1} castShadow={!busy} shadow-mapSize={[1024, 1024]} />
             <hemisphereLight args={['#9eb8ff', '#33291f', 0.8]} />
             {draft.showGround && (
-              <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
+              <mesh receiveShadow={!busy} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.01, 0]}>
                 <planeGeometry args={[80, 80]} />
                 <meshStandardMaterial color={draft.groundColor} roughness={0.92} />
               </mesh>

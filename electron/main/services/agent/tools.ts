@@ -32,7 +32,7 @@ export function createCanvasTools(projectId: string, folderPath: string) {
   const nodeFields = {
     title: z.string().optional(),
     prompt: z.string().optional(),
-    aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3']).optional(),
+    aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']).optional(),
     sourcePath: z.string().optional(),
     workflowId: z.string().optional(),
     duration: z.number().positive().optional(),
@@ -80,7 +80,7 @@ export function createCanvasTools(projectId: string, folderPath: string) {
       ),
       tool(
         'InvokeNodeAction',
-        'Trigger an action exposed by canvas nodes, e.g. "generate" on image/video nodes (use GetCanvasCapabilities to discover actions). Pass nodeIds to run the action on many nodes at once (batch generation). Async actions are acknowledged immediately and return a statusField per node; poll each target with GetCanvasNode until that field leaves the busy state (idle or error), then read sourcePath for the result.',
+        'Trigger an action exposed by canvas nodes, e.g. "generate" on image/video nodes (use GetCanvasCapabilities to discover actions). Pass nodeIds to run the action on many nodes at once (batch generation). Async actions are acknowledged immediately and return a statusField per node; poll each target with GetCanvasNode. generationStatus=generating means the canvas is still working, including automatic retries and backup-model switches; keep polling and do not report failure. generationStatus=idle with a non-empty sourcePath is success. generationStatus=error is the only failure of that node: read generationError, stop that node and its downstream video/upscale/image pipeline, and report the node id plus error. Do not interrupt unrelated sibling nodes that are still generating. When retrying, generate only failed nodes. Do not pick 备用1/备用2 yourself and do not re-invoke generate while the node is still generating. The generate action retries the current model up to 3 times then switches the settings backup models automatically. Do not treat a missing sourcePath as success. If this call itself returns accepted:false because an upstream connected media node failed or has no output, stop that downstream node and report that error.',
         {
           nodeId: z.string().optional(),
           nodeIds: z.array(z.string()).min(1).optional(),

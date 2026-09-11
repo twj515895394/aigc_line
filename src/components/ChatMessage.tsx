@@ -1,6 +1,8 @@
 import type { Attachment, ChatMessage } from '../shared/ipc.types';
 import { memo, useEffect, useState } from 'react';
 import { Markdown } from './Markdown';
+import { RevealInFolder, workspaceFilePath } from './RevealInFolder';
+import { useAppStore } from '../stores/app.store';
 
 interface ChatMessageProps {
   message: ChatMessage;
@@ -196,6 +198,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
 }
 
 function ChatMessageItemComponent({ message }: ChatMessageProps) {
+  const folderPath = useAppStore((state) => state.currentProject?.folderPath);
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
   const isToolCall = !!message.toolCall;
@@ -253,6 +256,10 @@ function ChatMessageItemComponent({ message }: ChatMessageProps) {
   // Artifact messages - rendered as a compact card in chat
   if (isArtifact && message.artifact) {
     const art = message.artifact;
+    const filePath = workspaceFilePath(folderPath, art.path);
+    if (!filePath) {
+      console.info('[reveal-in-folder] artifact card has no path', { title: art.title, path: art.path, folderPath });
+    }
     return (
       <div className='flex gap-2.5 py-1.5'>
         <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border border-[#d4af37]/30 bg-[#d4af37]/10 text-xs font-medium text-[#e8c766]'>
@@ -260,15 +267,18 @@ function ChatMessageItemComponent({ message }: ChatMessageProps) {
         </div>
         <div className='min-w-0 max-w-[90%] flex-1 rounded-2xl rounded-tl-sm border border-[#d4af37]/15 bg-gradient-to-br from-white/[0.045] to-[#d4af37]/[0.025] px-4 py-3 text-sm leading-relaxed text-[#e8e6df]'>
           <div className='mb-1 text-xs text-[#8a8794]'>生成了产物:</div>
-          <div className='flex items-center gap-2 rounded-lg border border-[#d4af37]/20 bg-[#d4af37]/[0.06] px-3 py-2'>
-            <svg className='h-4 w-4 text-[#e8c766]' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+          <RevealInFolder
+            filePath={filePath}
+            className='flex w-full items-center gap-2 rounded-lg border border-[#d4af37]/20 bg-[#d4af37]/[0.06] px-3 py-2 text-left'
+          >
+            <svg className='h-4 w-4 flex-none text-[#e8c766]' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
               <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' />
             </svg>
-            <span className='text-xs font-medium text-[#e8e6df]'>{art.title}</span>
-            <span className='ml-auto rounded bg-[#d4af37]/15 px-1.5 py-0.5 text-[10px] text-[#e8c766]'>
+            <span className='min-w-0 truncate text-xs font-medium text-[#e8e6df]'>{art.title}</span>
+            <span className='ml-auto flex-none rounded bg-[#d4af37]/15 px-1.5 py-0.5 text-[10px] text-[#e8c766]'>
               {art.type === 'image' ? '图片' : art.type === 'storyboard' ? '分镜表' : art.type}
             </span>
-          </div>
+          </RevealInFolder>
           <div className='mt-1 text-xs text-[#6d6a78]'>
             {formatTime(message.timestamp)}
           </div>
@@ -357,15 +367,16 @@ function ChatMessageItemComponent({ message }: ChatMessageProps) {
           {message.artifactRefs && message.artifactRefs.length > 0 && (
             <div className='mb-2 flex flex-wrap items-start gap-2'>
               {message.artifactRefs.map((ref) => (
-                <div
+                <RevealInFolder
                   key={ref.id}
+                  filePath={workspaceFilePath(folderPath, ref.path)}
                   className='flex items-center gap-1.5 rounded-lg border border-[#d4af37]/30 bg-[#d4af37]/[0.08] px-2 py-1 text-xs text-[#e8c766]'
                 >
                   <span>
                     {ref.type === 'storyboard' ? '🎬' : ref.type === 'image' ? '🖼️' : ref.type === 'html' ? '🌐' : '📄'}
                   </span>
                   <span className='max-w-[140px] truncate'>{ref.title}</span>
-                </div>
+                </RevealInFolder>
               ))}
             </div>
           )}

@@ -78,12 +78,18 @@ export function runGenerationTask(
   const operation = (async () => {
     let task = await readTask(file)
     const recoverable = task && (task.status === 'running' || task.status === 'submitting' || task.status === 'unknown' || (task.status === 'succeeded' && !task.acknowledged))
-    if (recoverable && task!.fingerprint !== fingerprint) throw new Error('该节点还有未确认的生成任务，请先恢复结果或处理原任务后再更改参数生成')
+    const sameRequest = task?.fingerprint === fingerprint
+    if (recoverable && !sameRequest && task!.status === 'running') {
+      throw new Error('该节点还有未确认的生成任务，请先恢复结果或处理原任务后再更改参数生成')
+    }
     if (task?.status === 'succeeded' && !task.acknowledged && task.relativePath) {
+      if (!sameRequest) throw new Error('该节点还有未确认的生成任务，请先恢复结果或处理原任务后再更改参数生成')
       return { success: true, relativePath: task.relativePath, promptId: task.taskId }
     }
-    if (task && ['submitting', 'unknown'].includes(task.status)) throw new Error('上次生成提交结果未知，为避免重复扣费不会自动重提，请在生成服务中确认任务状态')
-    if (!task || task.status !== 'running') {
+    if (task && sameRequest && ['submitting', 'unknown'].includes(task.status)) {
+      throw new Error('上次生成提交结果未知，为避免重复扣费不会自动重提，请在生成服务中确认任务状态')
+    }
+    if (!task || task.status !== 'running' || !sameRequest) {
       task = { version: 1, id: randomUUID(), projectId: request.projectId, nodeId: request.nodeId, provider: options.provider,
         operation: options.operation, request, fingerprint, status: 'submitting', updatedAt: Date.now() }
       await writeTask(file, task)

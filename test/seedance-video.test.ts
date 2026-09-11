@@ -59,4 +59,11 @@ describe('Seedance 2.0 video request', () => {
       'doubao-seedance-2-0-260128',
     ).duration).toBe(15)
   })
+
+  it('passes 3:4 through as an official Seedance ratio', () => {
+    expect(buildSeedanceVideoRequest(
+      { prompt: 'test', aspectRatio: '3:4', duration: 8 },
+      'doubao-seedance-2-0-260128',
+    ).ratio).toBe('3:4')
+  })
 })

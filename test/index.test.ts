@@ -71,6 +71,41 @@ describe('canvas node references', () => {
     expect(prompt).not.toContain('expectedRevision')
     expect(prompt).not.toContain('版本冲突')
   })
+
+  it('stops the generation pipeline on node failure', () => {
+    const prompt = buildSystemPromptAppend('E:\\workspace')
+
+    expect(prompt).toContain('idle 且 sourcePath 非空才算成功')
+    expect(prompt).toContain('禁止把 error 当成完成')
+    expect(prompt).toContain('禁止在上游图片失败或无输出时继续生该上游的下游视频')
+  })
+
+  it('requires canvas nodes to use the settings default workflow', () => {
+    const prompt = buildSystemPromptAppend('E:\\workspace')
+
+    expect(prompt).toContain('设置默认')
+    expect(prompt).toContain('不要改用豆包 Seedream、Seedance')
+  })
+
+  it('routes director previs and keyframes through video-prompt-skill', () => {
+    const prompt = buildSystemPromptAppend('E:\\workspace')
+
+    expect(prompt).toContain('video-prompt-skill')
+    expect(prompt).toContain('image-prompt-skill')
+    expect(prompt).toContain('generated/director-videos/')
+    expect(prompt).toContain('generated/director-stills/')
+    expect(prompt).toContain('导演台预演视频')
+    expect(prompt).toContain('导演台关键帧')
+    expect(prompt).toContain('禁止把导演台预演/关键帧当普通参考图或参考视频平均融合')
+  })
+
+  it('packs independent confirmation questions in one message', () => {
+    const prompt = buildSystemPromptAppend('E:\\workspace')
+
+    expect(prompt).toContain('彼此独立、答案互不影响的问题必须放在同一条消息里一次性问清')
+    expect(prompt).toContain('禁止把无依赖的确认拆成多轮一问一答')
+    expect(prompt).toContain('有先后依赖的问题仍一次只问当前这一组')
+  })
 })
 
 describe('chat file attachments', () => {
@@ -236,6 +271,14 @@ describe('skill slash commands', () => {
       name: 'test-skill',
       description: '测试技能',
       argumentHint: '<topic>',
+    })
+    expect(parseSkillFrontmatter(
+      '---\nname: manual-skill\ndescription: slash only\ndisable-model-invocation: true\n---\n',
+      'fallback',
+    )).toEqual({
+      name: 'manual-skill',
+      description: 'slash only',
+      disableModelInvocation: true,
     })
   })
 

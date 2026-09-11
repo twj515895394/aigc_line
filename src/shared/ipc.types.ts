@@ -15,6 +15,11 @@ export interface ProjectIndex {
   lastOpenedId?: string;
 }
 
+export interface ShowItemInFolderResult {
+  success: boolean;
+  error?: string;
+}
+
 /** Workspace manifest; legacy production arrays are preserved for older projects. */
 export interface ProjectManifest {
   projectId: string;
@@ -174,6 +179,8 @@ export interface AvailableSkill {
   name: string;
   description: string;
   argumentHint?: string;
+  /** True when the skill is slash-menu only and must not be auto-selected. */
+  disableModelInvocation?: boolean;
   source: AvailableSkillSource;
   path?: string;
 }
@@ -255,7 +262,7 @@ export interface CanvasNodeData extends Record<string, unknown> {
   prompt?: string;
   preview?: string;
   artifactId?: string;
-  aspectRatio?: ImageAspectRatio;
+  aspectRatio?: VideoAspectRatio;
   sourcePath?: string;
   sourceHistory?: string[];
   workflowId?: string;
@@ -336,6 +343,7 @@ export interface CanvasCommandResponse {
 
 // ComfyUI image generation
 export type ImageAspectRatio = '16:9' | '9:16' | '1:1' | '4:3';
+export type VideoAspectRatio = ImageAspectRatio | '3:4';
 
 export interface GenerateImageRequest {
   projectId: string;
@@ -351,10 +359,20 @@ export interface GenerateImageRequest {
 
 export type ComfyWorkflowKind = 'text-to-image' | 'image-to-image' | 'image-to-video';
 
+export type WorkflowFallbackRole = 'default' | 'fallback-1' | 'fallback-2'
+
+export interface WorkflowFallbackSlot {
+  id: string
+  note: string
+}
+
 export interface ComfyWorkflowInfo {
-  id: string;
-  name: string;
-  kind: ComfyWorkflowKind;
+  id: string
+  name: string
+  kind: ComfyWorkflowKind
+  recommended?: boolean
+  role?: WorkflowFallbackRole
+  fallbackNote?: string
 }
 
 export type VideoAnalysisProvider = 'qwen' | 'gemini';
@@ -376,7 +394,10 @@ export interface AppSettingsView {
   seedreamBaseUrl: string;
   seedreamApiKey: string;
   seedreamApiKeyConfigured: boolean;
-  defaultImageWorkflowId: string;
+  defaultImageWorkflowId: string
+  defaultVideoWorkflowId: string
+  fallbackImageWorkflows: WorkflowFallbackSlot[]
+  fallbackVideoWorkflows: WorkflowFallbackSlot[]
   videoAnalysisProvider: VideoAnalysisProvider;
   geminiBaseUrl: string;
   geminiApiKey: string;
@@ -394,7 +415,10 @@ export interface SaveAppSettingsRequest {
   comfyuiBaseUrl: string;
   agentBaseUrl?: string;
   qwenBaseUrl: string;
-  defaultImageWorkflowId: string;
+  defaultImageWorkflowId: string
+  defaultVideoWorkflowId?: string
+  fallbackImageWorkflows?: WorkflowFallbackSlot[]
+  fallbackVideoWorkflows?: WorkflowFallbackSlot[]
   agentToken?: string;
   clearAgentToken?: boolean;
   qwenApiKey?: string;
@@ -449,7 +473,7 @@ export interface GenerateVideoRequest {
   projectId: string;
   nodeId: string;
   prompt: string;
-  aspectRatio: ImageAspectRatio;
+  aspectRatio: VideoAspectRatio;
   duration?: number;
   workflowId?: string;
   referenceImagePath?: string;
@@ -576,6 +600,7 @@ export interface GenerationTaskSummary {
   taskId?: string;
   relativePath?: string;
   sourceVideoPath?: string;
+  workflowId?: string;
   error?: string;
   acknowledged?: boolean;
   updatedAt: number;

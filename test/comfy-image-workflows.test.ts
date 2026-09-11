@@ -16,8 +16,9 @@ describe('Krea 2 Turbo image workflow', () => {
 
     expect(workflow['30:10']).toMatchObject({
       class_type: 'UNETLoader',
-      inputs: { unet_name: 'krea2_turbo_fp8_scaled.safetensors' },
+      inputs: { unet_name: 'krea2\\krea2_turbo_int8_convrot.safetensors' },
     })
+    expect(workflow['30:12'].inputs.vae_name).toBe('qwan\\qwen_image_vae.safetensors')
     expect(workflow['30:6']).toMatchObject({
       class_type: 'CLIPTextEncode',
       inputs: { text: '' },
@@ -40,18 +41,22 @@ describe('Krea 2 Turbo image workflow', () => {
     expect(zImageWorkflow['57:13'].inputs).toMatchObject({ width: 2048, height: 1152 })
     expect(zImageWorkflow['57:62']).toBeUndefined()
     expect(zImageWorkflow['9'].inputs.images).toEqual(['57:8', 0])
+    expect(zImageWorkflow['57:28'].inputs.unet_name).toBe('z-image\\z_image_turbo_bf16.safetensors')
+    expect(zImageWorkflow['57:30'].inputs.clip_name).toBe('z-image\\qwen_3_4b.safetensors')
+    expect(zImageWorkflow['57:29'].inputs.vae_name).toBe('z-image\\ae.safetensors')
     expect(existsSync(path.join(workflowDirectory, 'flux2-klein-9b-text-to-image.json'))).toBe(false)
     expect(existsSync(path.join(workflowDirectory, 'flux2-klein-9b-image-edit.json'))).toBe(false)
   })
 
-  it('keeps image output at standard 2K and video output at the 1024 class', () => {
+  it('keeps image output at standard 2K and H3 video at the 0.98MP class', () => {
     expect(imageDimensionsFor('16:9')).toEqual({ width: 2048, height: 1152 })
     expect(imageDimensionsFor('9:16')).toEqual({ width: 1152, height: 2048 })
     expect(imageDimensionsFor('4:3')).toEqual({ width: 2048, height: 1536 })
     expect(imageDimensionsFor('1:1')).toEqual({ width: 2048, height: 2048 })
-    expect(videoDimensionsFor('16:9')).toEqual({ width: 1024, height: 576 })
-    expect(videoDimensionsFor('9:16')).toEqual({ width: 576, height: 1024 })
-    expect(videoDimensionsFor('4:3')).toEqual({ width: 1024, height: 768 })
-    expect(videoDimensionsFor('1:1')).toEqual({ width: 1024, height: 1024 })
+    expect(videoDimensionsFor('16:9')).toEqual({ width: 1344, height: 768 })
+    expect(videoDimensionsFor('9:16')).toEqual({ width: 768, height: 1344 })
+    expect(videoDimensionsFor('4:3')).toEqual({ width: 1152, height: 864 })
+    expect(videoDimensionsFor('3:4')).toEqual({ width: 864, height: 1152 })
+    expect(videoDimensionsFor('1:1')).toEqual({ width: 992, height: 992 })
   })
 })

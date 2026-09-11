@@ -185,6 +185,22 @@ Video-structure entry:
 <Video 1> (cut and pacing structure): weak_reference - ...
 ```
 
+Director-stage assets are optional. When present, describe only the jobs they actually have. The lines below are illustrations, not required wording.
+
+Previs used as camera and blocking guidance:
+
+```text
+<Video 1> (camera and blocking guidance): partially_preserved - follow <Video 1>'s camera route and subject blocking in [Shot 1]; replace the proxy figures with the final characters from other references; do not treat the mannequin look or previs soundtrack as final.
+```
+
+Keyframe used as a composition anchor:
+
+```text
+<Picture 2> (composition anchor for [Shot 1]): partially_preserved - keep the framing and placement from <Picture 2>; let motion develop in detailed_description; do not copy proxy appearance as final look.
+```
+
+If the pack only wants camera, omit blocking. If it only wants an end pose, omit the camera route. A previs file is `reference generation` unless it is truly being edited or continued. Do not emit a Chinese director-constraint heading.
+
 ### 4.2 Audio
 
 `<Audio N>` uses the following relationship markers:

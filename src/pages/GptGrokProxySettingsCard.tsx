@@ -15,6 +15,7 @@ export interface GptGrokProxySettingsCardProps {
   gptGrokEnabledVideoModelIds: string[];
   onGptGrokEnabledVideoModelIdsChange: (ids: string[]) => void;
   fieldClass: string;
+  bare?: boolean;
 }
 
 
@@ -44,6 +45,7 @@ export function GptGrokProxySettingsCard({
   gptGrokEnabledVideoModelIds,
   onGptGrokEnabledVideoModelIdsChange,
   fieldClass,
+  bare,
 }: GptGrokProxySettingsCardProps) {
   const [showGptGrokApiKey, setShowGptGrokApiKey] = useState(false);
   const [models, setModels] = useState<ReverseProxyModel[]>([]);
@@ -88,13 +90,7 @@ export function GptGrokProxySettingsCard({
     }
   };
 
-  return (
-    <section className="flex h-full min-w-0 flex-col rounded-2xl border border-white/[0.08] bg-[#111118] p-6 shadow-[0_16px_50px_rgba(0,0,0,0.18)]">
-      <div className="mb-5 border-b border-white/[0.07] pb-4">
-        <h2 className="text-sm font-semibold tracking-[0.14em] text-[#e8e6df]">GPT / Grok 反代</h2>
-        <p className="mt-2 text-xs leading-5 text-[#777482]">独立于 Gemini 的 OpenAI 兼容网关。获取模型只刷新本卡片列表，不会写入设置文件。生图勾选 ID 含 image 的模型，生视频勾选 ID 含 video 的模型。</p>
-      </div>
-      <div className="flex-1">
+  const body = (
         <div className="grid gap-5">
           <div>
             <label className="text-xs tracking-wider text-[#9a97a3]">GPT / Grok 反代地址</label>
@@ -165,7 +161,7 @@ export function GptGrokProxySettingsCard({
                       className="accent-[#d4af37]"
                     />
                     <span>{model.name}</span>
-                    <span className="font-mono text-[11px] text-[#666371]">{model.id}</span>
+                    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] text-[#9a97a3]">在线 · 图片</span>
                   </label>
                 ))}
               </div>
@@ -186,7 +182,7 @@ export function GptGrokProxySettingsCard({
                       className="accent-[#d4af37]"
                     />
                     <span>{model.name}</span>
-                    <span className="font-mono text-[11px] text-[#666371]">{model.id}</span>
+                    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] text-[#9a97a3]">在线 · 视频</span>
                   </label>
                 ))}
               </div>
@@ -204,7 +200,15 @@ export function GptGrokProxySettingsCard({
           </div>
           <p className="text-[11px] leading-5 text-[#5f5c68]">连接测试只请求模型目录，不生成图片或视频。API Key 使用操作系统安全存储加密。</p>
         </div>
+  )
+  if (bare) return body
+  return (
+    <section className="flex h-full min-w-0 flex-col rounded-2xl border border-white/[0.08] bg-[#111118] p-6 shadow-[0_16px_50px_rgba(0,0,0,0.18)]">
+      <div className="mb-5 border-b border-white/[0.07] pb-4">
+        <h2 className="text-sm font-semibold tracking-[0.14em] text-[#e8e6df]">GPT / Grok 反代</h2>
+        <p className="mt-2 text-xs leading-5 text-[#777482]">独立于 Gemini 的 OpenAI 兼容网关。获取模型只刷新本卡片列表，不会写入设置文件。生图勾选 ID 含 image 的模型，生视频勾选 ID 含 video 的模型。GPT 与 Grok 生图 payload 按模型 ID 分开，不共用一套。</p>
       </div>
+      <div className="flex-1">{body}</div>
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import { ipcMain, dialog, shell } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import log from 'electron-log/main';
 import { IPC_CHANNELS } from '../../../src/shared/ipc.channels';
 import {
   createProject,
@@ -11,6 +12,7 @@ import {
   readManifest,
 } from '../services/project.store';
 import { importProjectMediaFiles, listProjectMediaAssets } from '../services/project-media.service';
+import { isPathInsideFolder } from '../services/workspace-path';
 
 export function registerProjectHandlers(): void {
   ipcMain.handle(
@@ -111,7 +113,44 @@ export function registerProjectHandlers(): void {
     return result.filePaths;
   });
 
-  ipcMain.on('shell:showItemInFolder', (_event, filePath: string) => {
-    shell.showItemInFolder(filePath);
+  ipcMain.handle(IPC_CHANNELS.project.showItemInFolder, async (_event, filePath: string) => {
+    try {
+      log.info('[reveal-in-folder] request', filePath);
+      if (typeof filePath !== 'string' || !filePath.trim()) {
+        log.warn('[reveal-in-folder] invalid path');
+        return { success: false, error: '路径无效' };
+      }
+      const target = path.resolve(filePath.trim());
+      const index = await listProjects();
+      const allowed = index.projects.some((project) => isPathInsideFolder(target, project.folderPath));
+      log.info('[reveal-in-folder] resolved', { target, allowed, projectCount: index.projects.length });
+      if (!allowed) {
+        log.warn('[reveal-in-folder] rejected: not in registered project');
+        return { success: false, error: '只能打开已登记项目内的文件' };
+      }
+      try {
+        await fs.access(target);
+        log.info('[reveal-in-folder] showItemInFolder', target);
+        shell.showItemInFolder(target);
+        return { success: true };
+      } catch {
+        const directory = path.dirname(target);
+        if (!index.projects.some((project) => isPathInsideFolder(directory, project.folderPath))) {
+          log.warn('[reveal-in-folder] missing file and parent not in project', { target, directory });
+          return { success: false, error: '文件不存在' };
+        }
+        log.info('[reveal-in-folder] file missing, openPath', directory);
+        const opened = await shell.openPath(directory);
+        if (opened) {
+          log.warn('[reveal-in-folder] openPath failed', opened);
+          return { success: false, error: opened };
+        }
+        return { success: true };
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error('[reveal-in-folder] threw', message);
+      return { success: false, error: message };
+    }
   });
 }

@@ -34,6 +34,33 @@ export function isGptGrokVideoWorkflow(workflowId?: string): boolean {
   return parsePrefixedWorkflowId(workflowId, GPT_GROK_VIDEO_PREFIX) !== null
 }
 
+export function imageWorkflowReferenceLimit(workflowId?: string): number {
+  if (!workflowId) return 0
+  if (workflowId.startsWith('google-')) return 14
+  if (workflowId.startsWith('seedream-')) return 10
+  if (isGeminiProxyImageWorkflow(workflowId) || isGptGrokImageWorkflow(workflowId)) return 10
+  return 0
+}
+
+export function isCloudImageWorkflow(workflowId?: string): boolean {
+  return imageWorkflowReferenceLimit(workflowId) > 0
+}
+
+export function workflowTypeLabel(workflow: { id: string; kind: string }): string {
+  if (workflow.id.startsWith('google-')) return 'Google · 在线 · 多图'
+  if (workflow.id.startsWith('seedream-')) return '方舟 · 在线 · 多图'
+  if (isGeminiProxyImageWorkflow(workflow.id)) return 'Gemini 反代 · 在线 · 多图'
+  if (isGptGrokImageWorkflow(workflow.id)) return 'GPT / Grok · 在线 · 多图'
+  if (workflow.id.startsWith('seedance-')) return '方舟 · 全模态'
+  if (isGptGrokVideoWorkflow(workflow.id)) return 'GPT / Grok · 在线 · 视频'
+  if (workflow.id === 'minimax-h3-easy') return 'ComfyUI · 一采 · 文生/图生/参考'
+  if (workflow.id === 'minimax-h3-easy-2pass') return 'ComfyUI · 二采 · 高质量更慢'
+  if (workflow.id.startsWith('minimax-h3-r2v')) return workflow.id.endsWith('-turbo') ? 'ComfyUI · 全模态 · 加速' : 'ComfyUI · 全模态'
+  if (workflow.kind === 'image-to-video') return 'ComfyUI · 视频'
+  if (workflow.kind === 'image-to-image') return 'ComfyUI · 图生图'
+  return 'ComfyUI · 文生图'
+}
+
 export function listEnabledReverseProxyWorkflows(settings: {
   geminiEnabledImageModelIds: string[]
   gptGrokEnabledImageModelIds: string[]

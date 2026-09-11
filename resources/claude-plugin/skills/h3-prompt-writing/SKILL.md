@@ -27,6 +27,42 @@ Ref2VA rewrites use `subject_definitions`, `summary`, `retention_analysis`, `det
 
 Read `references/ref-en.txt` for label rules, retention analysis, and complete examples.
 
+## Director-stage assets
+
+Director-stage previs and keyframes are optional reference layers. Fold whatever they actually contribute into the six official English fields. Do not paste a Chinese “导演台参考约束” heading, and do not invent a seventh section. If those assets are absent, write a normal H3 prompt.
+
+Recognize when the input makes it clear:
+
+- Previs: `generated/director-videos/`, a read-only previs node, or the user/director pack calls it 预演 / 白模预演 / 代理动画.
+- Keyframe: `generated/director-stills/`, a `capture-still` image, or 关键帧 / 构图截图.
+
+A video-prompt “导演台参考约束” block, if present, is source material to interpret, not a required output shape. If the drama director pack already names the previs/keyframe job, use that even without the Chinese block. Ambiguous white-model footage that is not identified as director-stage stays ordinary reference.
+
+Write living constraints, not a fixed inherit-all list. For each director-stage asset, keep only the jobs the input actually assigns. Typical jobs, mix as needed:
+
+- camera path, framing, or viewpoint
+- spatial blocking and subject placement
+- macro action, timing, or end pose
+- composition / facing / scale as a still anchor
+
+Typical non-jobs, unless the user explicitly wants them:
+
+- proxy mannequin color, material, costume, identity
+- previs render style as final look
+- previs soundtrack as the final mix
+
+Ref2VA: put those jobs into the existing labels and sentences.
+
+- `subject_definitions`: say what this `<Video N>` or `<Picture N>` is for in this shot, in one natural English line.
+- `summary`: usually `[reference generation]` when previs/keyframes only guide camera or blocking. Use `video editing` / `video continuation` / `keyframe completion` only when that file really is the edit source or a first/last frame.
+- `retention_analysis`: pick `fully_preserved`, `partially_preserved`, or `weak_reference` from the real job. Most previs/keyframes are `partially_preserved`. Name the kept dimensions and the dropped ones in the same line; do not dump every possible dimension.
+- `detailed_description`: turn kept camera/blocking into shot action. Replace proxies with final characters/sets from other references when those exist.
+- Sound fields: design from the current task. Do not copy previs audio by default. If the task forbids BGM, `non_diegetic_music: N/A`.
+
+I2VA / FL2VA / L2VA: if a director still is actually the first or last frame, inherit only the still’s assigned job (often composition/placement) in `integrated_multimodal_description`. Final look still comes from character/scene references when those are present.
+
+If previs and a keyframe disagree, do not average them. Prefer the pack/user assignment; otherwise previs for motion/camera, keyframe for static anchors.
+
 ## Output Rules
 
 - Write rewrite sections in English; preserve dialogue, lyrics, and visible scene text in their original language.

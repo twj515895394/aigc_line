@@ -7,7 +7,7 @@ vi.mock('../electron/main/services/project.store',()=>({
  writeSessionId:async(folder:string,id:string,provider:string)=>{state.sessionIds.set(`${folder}:${provider}`,id)},
 }));
 vi.mock('../electron/main/services/message-hub',()=>({messageHub:{pushToFrontend:state.push,notifyTurnEnd:state.end,notifyError:state.error}}));
-vi.mock('../electron/main/services/agent/skills',()=>({scanAvailableSkills:async()=>[{name:'aigc-canvas:demo',path:'/builtin/demo/SKILL.md',description:'demo',source:'builtin'}]}));
+vi.mock('../electron/main/services/agent/skills',()=>({scanAvailableSkills:async()=>[{name:'aigc-canvas:demo',path:'/builtin/demo/SKILL.md',description:'demo',source:'builtin'},{name:'aigc-canvas:codex-image-generation',path:'/builtin/codex-image/SKILL.md',description:'slash only',source:'builtin',disableModelInvocation:true}]}));
 vi.mock('../electron/main/services/agent/codex-runtime',()=>({getNetworkCodexRuntime:async()=>({executablePath:'/codex',env:{PATH:'/bin'}})}));
 vi.mock('../electron/main/services/agent/canvas-mcp',()=>({startCanvasMcpBridge:async()=>({url:'http://127.0.0.1:1234/mcp',token:'test-token',close:state.close})}));
 vi.mock('@openai/codex-sdk',()=>({Codex:class {
@@ -47,7 +47,7 @@ describe('Codex SDK sessions',()=>{
  expect(getCodexQueue(id)).toEqual([]);
  expect(state.push.mock.calls.some(call=>call[1].id==='queued-b' && call[1].deliveryStatus==='sent')).toBe(true);
  expect(state.error).not.toHaveBeenCalled();
- expect(()=>sendCodexQueuedNow(id,'queued-b')).toThrow('已开始处理');
+ expect(()=>sendCodexQueuedNow(id,'queued-b')).not.toThrow()
  });
  it('keeps streaming after missing tool arguments or a newer runtime item type',async()=>{
  const {session}=setup();state.events=[
@@ -70,6 +70,8 @@ describe('Codex SDK sessions',()=>{
  expect(state.starts[0]).toMatchObject({model:'selected-model',workingDirectory:`/workspace/${id}`,skipGitRepoCheck:true});
  expect(state.runs[0].input).toContainEqual({type:'local_image',path:'/workspace/image.png'});
  expect(state.runs[0].input[0].text).toContain('/builtin/demo/SKILL.md');
+ expect(state.options[0].config.developer_instructions).toContain('/builtin/demo/SKILL.md');
+ expect(state.options[0].config.developer_instructions).not.toContain('codex-image-generation');
  expect(state.sessionIds.get(`/workspace/${id}:codex`)).toBe('sdk-thread');
  await session.enqueue({...message,id:'user-2'});await vi.waitFor(()=>expect(state.end).toHaveBeenCalledTimes(2));
  expect(state.resumes[0].id).toBe('sdk-thread');expect(state.close).toHaveBeenCalledTimes(2);
@@ -93,6 +95,16 @@ describe('Codex SDK sessions',()=>{
  expect(state.runs[0].options.signal.aborted).toBe(true);expect(state.runs).toHaveLength(1);expect(state.error).not.toHaveBeenCalled();
  expect(state.push.mock.calls.some(call=>call[1].toolCall?.status==='interrupted')).toBe(true);
  await session.clear();expect(state.sessionIds.get(`/workspace/${id}:codex`)).toBe('');expect(state.append).toHaveBeenLastCalledWith(`/workspace/${id}`,expect.objectContaining({event:'context-cleared'}));
+ });
+ it('ignores send-now while stop is already clearing the queue',async()=>{
+ const {session,id}=setup();state.hold=true;
+ await session.enqueue(message);await vi.waitFor(()=>expect(state.runs).toHaveLength(1));
+ await session.enqueue({...message,id:'queued-a',content:'second'});
+ const stopping=session.interrupt();
+ expect(()=>sendCodexQueuedNow(id,'queued-a')).not.toThrow();
+ await stopping;await vi.waitFor(()=>expect(state.end).toHaveBeenCalled());
+ expect(getCodexQueue(id)).toEqual([]);
+ expect(state.runs).toHaveLength(1);
  });
  it('allows SDK reconnection events to recover before the final reply',async()=>{
  const {session}=setup();state.events=[{type:'error',message:'Reconnecting... 1/5 (request timed out)'},{type:'item.completed',item:{id:'item_0',type:'agent_message',text:'recovered'}},{type:'turn.completed'}];

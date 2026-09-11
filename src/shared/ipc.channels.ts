@@ -10,6 +10,7 @@ export const IPC_CHANNELS = {
     importAudio: 'project:importAudio',
     importMedia: 'project:importMedia',
     listMedia: 'project:listMedia',
+    showItemInFolder: 'shell:showItemInFolder',
   },
   chat: {
     sendMessage: 'chat:sendMessage',

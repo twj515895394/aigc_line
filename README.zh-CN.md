@@ -62,7 +62,7 @@ Codex 优先使用显式代理环境变量；未配置时，应用会解析系�
 - **节点化生产流水线**：Agent 直接创建“参考图片 → 视频”节点链，画布节点是生产数据的唯一来源。
 - **多模型图片生成**：ComfyUI 的 Krea 2 Turbo、Z-Image Turbo 当前仅支持 2K 文生图；Google Nano Banana 2 / Pro 支持最多 14 张有序参考图，Doubao-Seedream-5.0-pro / lite 支持最多 10 张有序参考图，覆盖 16:9 / 9:16 / 1:1 / 4:3。
 - **MiniMax H3 文生视频 / 首尾帧视频**：连接的图片会进入候选集，可拖入明确的首帧和尾帧槽位；两个槽位均可选，也支持只设置其中一个。
-- **MiniMax H3 全模态参考视频**：可将连接的素材拖入有序的图片轨、视频轨和音频轨。轨道顺序直接对应提示词中的 `<Picture n>`、`<Video n>`、`<Audio n>`，上限分别为 9 张图片、3 个视频和 3 段独立音频；生成时可选择标准 20 步工作流或带 Turbo 8 步 LoRA 的加速工作流。
+- **MiniMax H3 全模态参考视频**：可将连接的素材拖入有序的图片轨、视频轨和音频轨。轨道顺序直接对应提示词中的 `<Picture n>`、`<Video n>`、`<Audio n>`，上限分别为 9 张图片、3 个视频和 3 段独立音频；生成时可选择标准 20 步工作流或带 Ref2V Turbo 8 步 LoRA 的加速工作流；文生/首尾帧使用 FL2V Turbo 4 步 LoRA。
 - **Seedance 2.0 云端视频生成**：通过火山方舟 Agent Plan 生成 720p、4–15 秒同步音频视频，支持纯文本或最多 9 张图片、3 个视频、3 段音频的全模态参考；素材在提示词中按“图片1 / 视频1 / 音频1”引用，结果自动下载到项目目录。
 - **通用视频分析**：Agent 可把项目内视频路径或公开 HTTP(S) 视频地址连同自定义分析要求交给 Qwen3.5-Omni Plus；工具顺序扫描完整画面与音轨，区分观察、转写和推断，为关键结论提供时间戳与不确定性说明，并保存 Markdown 报告。
 - **RTX 视频放大**：视频放大节点支持 2× / 3× / 4× 和 FAST / MEDIUM / HIGH / ULTRA 质量档位，输出帧率自动跟随源视频。
@@ -209,7 +209,7 @@ UE 白模来自 William Luque 的 [UE Mannequin (Retopology)](https://sketchfab.
 4. 场景草案支持 `box / wall / cylinder / sphere / floor / platform / stairs / ramp / cone / capsule / doorframe / windowframe / table / chair / sofa / bed / cabinet / railing`。
 5. 相同参考图重新搭建时，只替换该图生成且未锁定的几何，保留演员、手工元素、其他参考图几何和全部机位。
 
-Agent 还可通过 `InvokeNodeAction` 原子执行 `add-element`、`add-shot`、`set-actor-path`、`set-camera-constraint` 和 `set-camera-keyframe`，无需为小改动重写完整导演工程。
+Agent 还可通过 `InvokeNodeAction` 原子执行 `add-element`、`add-shot`、`set-actor-path`、`set-camera-constraint`、`set-camera-keyframe`、`apply-scene-draft`、`capture-still` 和 `export-video`，无需为小改动重写完整导演工程；导出构图/预演会打开 3D 导演台并创建相连的只读图片或视频节点。
 
 ### 自动保存与输出
 
@@ -259,12 +259,14 @@ Agent 还可通过 `InvokeNodeAction` 原子执行 `add-element`、`add-shot`、
 | Doubao-Seedream-5.0-pro（火山方舟 API） | 文生图 / 最多 10 张有序参考图，2K | — |
 | Doubao-Seedream-5.0-lite（火山方舟 API） | 文生图 / 最多 10 张有序参考图，2K | — |
 | Doubao Seedance 2.0（方舟 Agent Plan） | 文本 / 图片 / 视频 / 音频生视频，720p 同步音频 | — |
-| MiniMax H3 | 文本 / 首尾帧生视频 | — |
+| MiniMax H3 一采 | 文生 / 首尾帧 / 全模态参考，默认 10 步 | — |
+| MiniMax H3 二采 | 文生 / 首尾帧 / 全模态参考，高质量更慢，需手动选择 | — |
+| MiniMax H3 | 文本 / 首尾帧生视频，FL2V Turbo 4 步 | — |
 | MiniMax H3 全模态参考 | 图片 / 视频 / 音频生视频 | — |
-| MiniMax H3 全模态参考（加速 LoRA） | 图片 / 视频 / 音频生视频，Turbo 8 步 | — |
+| MiniMax H3 全模态参考（加速 LoRA） | 图片 / 视频 / 音频生视频，Ref2V Turbo 8 步 | — |
 | RTX Video Super Resolution | 视频放大 | 2× / 3× / 4× |
 
-工作流模板位于 resources/comfyui-workflows/。ComfyUI 服务端需要提前安装模板所使用的模型和自定义节点；加速全模态工作流还需要 `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` LoRA。H3 参考视频会同时使用画面和内嵌音轨；也可在已有输出的视频节点上点击“提取音频”，生成独立音频节点后放入单独音频参考轨。
+工作流模板位于 resources/comfyui-workflows/。ComfyUI 服务端需要提前安装模板所使用的模型和自定义节点；加速全模态工作流使用 `minimax/minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors`；文生/首尾帧使用 `minimax/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors`。H3 参考视频会同时使用画面和内嵌音轨；也可在已有输出的视频节点上点击“提取音频”，生成独立音频节点后放入单独音频参考轨。
 
 图片输出分辨率：
 
@@ -278,9 +280,11 @@ MiniMax H3 输出分辨率：
 
 | 画幅 | 分辨率 |
 |---|---:|
-| 16:9 | 1024 × 576 |
-| 4:3 | 1024 × 768 |
-| 1:1 | 1024 × 1024 |
+| 16:9 | 1344 × 768 |
+| 9:16 | 768 × 1344 |
+| 4:3 | 1152 × 864 |
+| 3:4 | 864 × 1152 |
+| 1:1 | 992 × 992 |
 
 ## 系统配置
 
@@ -328,7 +332,7 @@ pnpm build
 │   │       └── project.store.ts    # 项目、聊天和画布持久化
 │   └── preload/                    # electronAPI 安全桥接
 ├── resources/comfyui-workflows/    # ComfyUI API 工作流模板
-├── resources/claude-plugin/        # 应用内置 Claude Plugin 与 Skill
+├── resources/claude-plugin/        # 应用内置 Claude Plugin 与 Skill；image/video-prompt-skill 为 git submodule
 ├── src/
 │   ├── components/CanvasArea.tsx   # React Flow 画布与生成节点
 │   ├── pages/                      # 首页、项目页、设置页

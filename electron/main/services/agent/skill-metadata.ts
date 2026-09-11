@@ -16,7 +16,7 @@ function unquote(value: string): string {
 export function parseSkillFrontmatter(
   content: string,
   fallbackName: string,
-): Pick<AvailableSkill, 'name' | 'description' | 'argumentHint'> {
+): Pick<AvailableSkill, 'name' | 'description' | 'argumentHint' | 'disableModelInvocation'> {
   const frontmatter = /^---\s*\r?\n([\s\S]*?)\r?\n---/.exec(content)?.[1] ?? '';
   const readField = (field: string): string => {
     const match = new RegExp(`^${field}:\\s*(.+)$`, 'mi').exec(frontmatter);
@@ -27,6 +27,7 @@ export function parseSkillFrontmatter(
     name: readField('name') || fallbackName,
     description: readField('description') || '无描述',
     argumentHint: readField('argument-hint') || undefined,
+    ...(readField('disable-model-invocation') === 'true' ? { disableModelInvocation: true } : {}),
   };
 }
 

@@ -9,8 +9,10 @@
  */
 
 export interface FieldOption {
-  value: string;
-  label: string;
+  value: string
+  label: string
+  recommended?: boolean
+  role?: 'default' | 'fallback-1' | 'fallback-2'
 }
 
 export type NodeFieldType = 'string' | 'number' | 'boolean' | 'enum' | 'string-array' | 'object';

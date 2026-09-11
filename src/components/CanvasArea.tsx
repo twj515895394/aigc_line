@@ -64,6 +64,7 @@ import { orderImageReferences } from '../shared/image-references'
 import { pickDefaultWorkflowId } from '../shared/default-workflows'
 import { runGenerationFallbackChain, workflowFallbackChain } from '../shared/generation-fallback'
 import { blockedUpstreamGenerationMessage } from '../shared/generation-gate'
+import { imageWorkflowReferenceLimit, isCloudImageWorkflow, workflowTypeLabel } from '../shared/reverse-proxy-workflows'
 import type { DirectorActorModelId, DirectorAspectRatio, DirectorBodyType, DirectorPoseId, DirectorProject, DirectorShot, DirectorVec3 } from '../shared/director.types'
 import { directorElementKindSchema, directorProjectSchema, directorSceneDraftSchema } from '../shared/director-schema'
 import { DIRECTOR_PRIMITIVE_KINDS } from '../shared/director-element-catalog'
@@ -83,6 +84,7 @@ import {
 } from '../features/director/director-model'
 import { applyDirectorReviewAutoFixes, directorReviewPassed, reviewDirectorProject } from '../features/director/director-scene-review'
 import type { DirectorStageRequest } from '../features/director/DirectorStageDialog'
+import { readDirectorRunningTool, retainDirectorRunningTool, type DirectorRunningTool } from '../features/director/director-agent-status'
 import './canvas-capabilities'
 
 const DirectorStageDialog = lazy(() => import('../features/director/DirectorStageDialog').then((module) => ({
@@ -439,6 +441,12 @@ const beginNodeInteraction = () => beginCanvasInteraction('nodes')
 const endNodeInteraction = () => endCanvasInteraction('nodes')
 const beginViewportInteraction = () => beginCanvasInteraction('viewport')
 
+let lastDirectorRunningTool: DirectorRunningTool | null = null
+const selectDirectorRunningTool = (state: { messages: Array<{ toolCall?: { toolName: string; toolInput: string; status: string } }> }) => {
+  lastDirectorRunningTool = retainDirectorRunningTool(lastDirectorRunningTool, readDirectorRunningTool(state.messages))
+  return lastDirectorRunningTool
+}
+
 function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
   const nodes = useStore(selectNodeContent, equalNodeContent)
   const edges = useEdges<StoryEdge>()
@@ -458,10 +466,8 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
     : item.kind === 'text-to-image')
   const selectedWorkflow = availableWorkflows.find((item) => item.id === current?.data.workflowId)
     ?? availableWorkflows[0]
-  const isGoogleImageWorkflow = kind === 'image' && (selectedWorkflow?.id.startsWith('google-') ?? false)
-  const isSeedreamImageWorkflow = kind === 'image' && (selectedWorkflow?.id.startsWith('seedream-') ?? false)
-  const isCloudImageWorkflow = isGoogleImageWorkflow || isSeedreamImageWorkflow
-  const imageReferenceLimit = isGoogleImageWorkflow ? 14 : isSeedreamImageWorkflow ? 10 : 0
+  const cloudImageWorkflow = kind === 'image' && isCloudImageWorkflow(selectedWorkflow?.id)
+  const imageReferenceLimit = kind === 'image' ? imageWorkflowReferenceLimit(selectedWorkflow?.id) : 0
   const isSeedanceWorkflow = selectedWorkflow?.id.startsWith('seedance-') ?? false
   const isEasyH3Workflow = selectedWorkflow?.id === 'minimax-h3-easy' || selectedWorkflow?.id === 'minimax-h3-easy-2pass'
   const isReferenceWorkflow = (selectedWorkflow?.id.startsWith('minimax-h3-r2v') ?? false) || isSeedanceWorkflow || isEasyH3Workflow
@@ -587,7 +593,7 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
                   >
                     <span className="min-w-0 flex-1 truncate">{workflow.name}</span>
                     <span className="flex-shrink-0 rounded bg-white/[0.06] px-1.5 py-0.5 text-[8px] text-white/35">
-                      {workflow.id.startsWith('google-') ? 'Google · 多图' : workflow.id.startsWith('seedream-') ? '方舟 · 多图' : workflow.id.startsWith('seedance-') ? '方舟 · 全模态' : workflow.id === 'minimax-h3-easy' ? '一采 · 文生/图生/参考' : workflow.id === 'minimax-h3-easy-2pass' ? '二采 · 高质量更慢' : workflow.id.startsWith('minimax-h3-r2v') ? (workflow.id.endsWith('-turbo') ? '全模态 · 加速' : '全模态') : workflow.kind === 'image-to-video' ? '视频' : workflow.kind === 'image-to-image' ? '图生图' : 'ComfyUI · 文生图'}
+                      {workflowTypeLabel(workflow)}
                     </span>
                   </button>
                 ))}
@@ -596,7 +602,7 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
         </div>
       </div>
 
-      {isCloudImageWorkflow && (
+      {cloudImageWorkflow && (
         <div className="mb-2.5 rounded-xl border border-dashed border-white/15 bg-black/15 p-2">
           <div className="mb-1.5 flex items-center gap-1.5 text-[9px] text-white/45">
             {nodeIcon('image')}
@@ -653,7 +659,7 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
         </div>
       )}
 
-      {kind === 'image' && !isCloudImageWorkflow && imageCandidates.length > 0 && (
+      {kind === 'image' && !cloudImageWorkflow && imageCandidates.length > 0 && (
         <div className="mb-2.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-2.5 py-2 text-[9px] text-white/35">
           当前 ComfyUI 图片工作流仅支持文生图，已连接图片不会作为生成参考。
         </div>
@@ -838,7 +844,7 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
         </div>
       )}
 
-      {!isFirstLastWorkflow && !isReferenceWorkflow && !isCloudImageWorkflow && incoming.length > 0 && (
+      {!isFirstLastWorkflow && !isReferenceWorkflow && !cloudImageWorkflow && incoming.length > 0 && (
         <div className="mb-2.5 flex flex-wrap gap-2">
           {incoming.map(({ edge, source }, index) => (
             <div
@@ -1666,13 +1672,7 @@ function CanvasFlow() {
 
   const sendScopedAgentMessage = useAppStore((state) => state.sendScopedAgentMessage)
   const directorAgentBusy = useAppStore((state) => !!state.currentProject && state.agentThinkingByProject[state.currentProject.id] === true)
-  const directorRunningTool = useAppStore((state) => {
-    for (let index = state.messages.length - 1; index >= 0; index--) {
-      const tool = state.messages[index].toolCall
-      if (tool?.status === 'running') return { toolName: tool.toolName, toolInput: tool.toolInput }
-    }
-    return null
-  })
+  const directorRunningTool = useAppStore(selectDirectorRunningTool)
   const [directorStage, setDirectorStage] = useState<{ nodeId: string; request?: DirectorStageRequest } | null>(null)
   const directorStageRef = useRef(directorStage)
   directorStageRef.current = directorStage
@@ -1915,15 +1915,15 @@ function CanvasFlow() {
     }
     patchNodeData(nodeId, { generationStatus: 'generating', generationError: '' })
     try {
-      const workflows: ComfyWorkflowInfo[] = await listCachedComfyWorkflows()
+      const workflows: ComfyWorkflowInfo[] = await listCachedComfyWorkflows(true)
       const selectedId = pickDefaultWorkflowId('text-to-image', workflows, current.data.workflowId)
       await runGenerationFallbackChain({
         chain: workflowFallbackChain('text-to-image', workflows, selectedId),
-        onSwitch: (nextId, previousError) => {
-          patchNodeData(nodeId, { workflowId: nextId, generationStatus: 'generating', generationError: `本节点已重试 3 次仍失败（${previousError}），已切换备用` })
+        onSwitch: (nextId) => {
+          patchNodeData(nodeId, { workflowId: nextId, generationStatus: 'generating', generationError: '' })
         },
-        onRetry: (_workflowId, attempt, previousError) => {
-          patchNodeData(nodeId, { generationStatus: 'generating', generationError: `本节点第 ${attempt} 次重试（${previousError}）` })
+        onRetry: () => {
+          patchNodeData(nodeId, { generationStatus: 'generating', generationError: '' })
         },
         run: async (workflowId) => {
           patchNodeData(nodeId, { workflowId })
@@ -1931,11 +1931,7 @@ function CanvasFlow() {
             .filter((edge) => edge.target === nodeId)
             .map((edge) => nodesRef.current.find((node) => node.id === edge.source))
             .filter((source): source is StoryNode => !!source && source.data.kind === 'image' && !!source.data.sourcePath)
-          const imageReferenceLimit = workflowId.startsWith('google-')
-            ? 14
-            : workflowId.startsWith('seedream-')
-              ? 10
-              : 0
+          const imageReferenceLimit = imageWorkflowReferenceLimit(workflowId)
           const live = nodesRef.current.find((node) => node.id === nodeId) ?? current
           const referenceImagePaths = orderImageReferences(
             incomingImageNodes,
@@ -1983,15 +1979,15 @@ function CanvasFlow() {
     }
     patchNodeData(nodeId, { generationStatus: 'generating', generationError: '' })
     try {
-      const workflows: ComfyWorkflowInfo[] = await listCachedComfyWorkflows()
+      const workflows: ComfyWorkflowInfo[] = await listCachedComfyWorkflows(true)
       const selectedId = pickDefaultWorkflowId('image-to-video', workflows, current.data.workflowId)
       await runGenerationFallbackChain({
         chain: workflowFallbackChain('image-to-video', workflows, selectedId),
-        onSwitch: (nextId, previousError) => {
-          patchNodeData(nodeId, { workflowId: nextId, generationStatus: 'generating', generationError: `本节点已重试 3 次仍失败（${previousError}），已切换备用` })
+        onSwitch: (nextId) => {
+          patchNodeData(nodeId, { workflowId: nextId, generationStatus: 'generating', generationError: '' })
         },
-        onRetry: (_workflowId, attempt, previousError) => {
-          patchNodeData(nodeId, { generationStatus: 'generating', generationError: `本节点第 ${attempt} 次重试（${previousError}）` })
+        onRetry: () => {
+          patchNodeData(nodeId, { generationStatus: 'generating', generationError: '' })
         },
         run: async (workflowId) => {
           patchNodeData(nodeId, { workflowId, generationStatus: 'generating' })

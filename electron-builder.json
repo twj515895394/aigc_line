@@ -17,7 +17,15 @@
     },
     {
       "from": "resources/claude-plugin",
-      "to": "claude-plugin"
+      "to": "claude-plugin",
+      "filter": [
+        "**/*",
+        "!**/.git",
+        "!**/.git/**",
+        "!**/.github/**",
+        "!**/.handoff/**",
+        "!**/docs/**"
+      ]
     }
   ],
   "mac": {

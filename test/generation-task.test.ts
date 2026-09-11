@@ -53,6 +53,15 @@ describe('persistent generation tasks', () => {
     await expect(runGenerationTask(options(), { submit: async mark => { mark(); return 'cancelled-task' }, complete: async () => { throw new TerminalGenerationError('cancelled') } })).rejects.toThrow('cancelled')
     expect(await runGenerationTask(options(), { submit: async mark => { mark(); return 'replacement' }, complete: async () => ({ success: true, relativePath: 'result.mp4' }) })).toMatchObject({ promptId: 'replacement' })
   })
+  it('lets a later model switch retry after a terminal HTTP failure', async () => {
+    const generate = vi.fn(async mark => { mark(); throw new TerminalGenerationError('Gemini 反代生图失败（HTTP 502）') })
+    await expect(runLocalGeneration({ project, provider: 'gemini-proxy', request }, generate)).rejects.toThrow('HTTP 502')
+    expect(await record()).toMatchObject({ status: 'failed' })
+    const switched = { ...request, workflowId: 'gpt-grok-image:gpt-image-2' }
+    const retry = vi.fn(async mark => { mark(); return { success: true, relativePath: 'generated/grok.png' } })
+    expect(await runLocalGeneration({ project, provider: 'gpt-grok', request: switched }, retry)).toMatchObject({ relativePath: 'generated/grok.png' })
+    expect(retry).toHaveBeenCalledTimes(1)
+  })
   it('never stores unexpected credentials and prevents a changed request from replacing a pending task', async () => {
     const unsafe = { ...request, apiKey: 'DO-NOT-SAVE', token: 'DO-NOT-SAVE' }
     await expect(runGenerationTask({ ...options(), request: unsafe }, { submit: async mark => { mark(); return 'pending' }, complete: async () => { throw new Error('offline') } })).rejects.toThrow()

@@ -18,6 +18,7 @@ import {
   readSessionId,
   writeSessionId,
   appendChatMessage,
+  updateChatMessage,
 } from '../project.store';
 import { messageHub } from '../message-hub';
 import type { AgentOptions, ToolCallInfo } from './types';
@@ -25,7 +26,7 @@ import type { AvailableSkill } from '../../../../src/shared/ipc.types';
 import { buildUserPrompt, buildSystemPromptAppend } from './prompts';
 import { createPushArtifactServer } from './tools';
 import { createToolTrackingHooks, interruptActiveToolCalls } from './hooks';
-import { extractMessageText } from './stream';
+import { extractAssistantMessageId, extractMessageText, mergeAssistantText } from './stream';
 import { createBuiltinPluginConfig, resolveBuiltinPluginPath } from './builtin-plugin';
 import { scanAvailableSkills } from './skills';
 import { mergeDiscoveredSkills } from './skill-metadata';
@@ -72,6 +73,8 @@ interface ProjectAgentSession {
   /** Turns the user has requested but the agent has not finished yet */
   pendingTurns: number;
   pendingContextClear: PendingContextClear | null;
+  /** Live assistant bubbles keyed by SDK message.id so duplicate frames update in place. */
+  assistantById: Map<string, ChatMessage>;
 }
 
 const sessions = new Map<string, ProjectAgentSession>();
@@ -99,6 +102,7 @@ function getOrCreateSession(
       pumping: false,
       pendingTurns: 0,
       pendingContextClear: null,
+      assistantById: new Map(),
     };
     sessions.set(projectId, session);
   }
@@ -169,22 +173,28 @@ async function handleStreamMessage(
         session.pendingTurns = 0;
         messageHub.notifyTurnEnd(session.projectId);
       }
+      session.assistantById.clear();
       return;
     }
   }
 
   const text = extractMessageText(message);
   if (session.pendingContextClear && text?.trim() === '(no content)') return;
-  if (text) {
-    const textMsg: ChatMessage = {
-      id: `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      role: 'assistant',
-      content: text,
-      timestamp: Date.now(),
-    };
-    messageHub.pushToFrontend(session.projectId, textMsg);
-    await appendChatMessage(session.folderPath, textMsg);
-  }
+  if (!text) return;
+  const id = extractAssistantMessageId(message) ?? `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const existing = session.assistantById.get(id);
+  const content = mergeAssistantText(existing?.content, text);
+  if (content === undefined) return;
+  const textMsg: ChatMessage = {
+    id,
+    role: 'assistant',
+    content,
+    timestamp: existing?.timestamp ?? Date.now(),
+  };
+  session.assistantById.set(id, textMsg);
+  messageHub.pushToFrontend(session.projectId, textMsg);
+  if (existing) await updateChatMessage(session.folderPath, id, () => textMsg);
+  else await appendChatMessage(session.folderPath, textMsg);
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

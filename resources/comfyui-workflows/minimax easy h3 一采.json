@@ -1,0 +1,316 @@
+{
+  "253": {
+    "inputs": {
+      "model": "Minimax/minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+      "text_encoder": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+      "video_vae": "minimax_h3_video_vae_fp16.safetensors",
+      "audio_vae": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "FeiHouEasyH3UnifiedLoader",
+    "_meta": {
+      "title": "FeiHou Easy H3 混合加载器"
+    }
+  },
+  "258": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "263",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "263": {
+    "inputs": {
+      "attention": "comfy kitchen attention",
+      "model": [
+        "300",
+        0
+      ]
+    },
+    "class_type": "ModelAttentionBackend",
+    "_meta": {
+      "title": "ModelAttentionBackend"
+    }
+  },
+  "264": {
+    "inputs": {
+      "lora_name": "minimax\\Minimax H3真实电影质感V0.1.safetensors",
+      "strength_model": 0.55,
+      "model": [
+        "265",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器(仅模型)"
+    }
+  },
+  "265": {
+    "inputs": {
+      "lora_name": "minimax\\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+      "strength_model": 0.7,
+      "model": [
+        "258",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器(仅模型)"
+    }
+  },
+  "266": {
+    "inputs": {
+      "h3_context": [
+        "335",
+        1
+      ]
+    },
+    "class_type": "FeiHouEasyH3Output",
+    "_meta": {
+      "title": "FeiHou Easy H3 输出"
+    }
+  },
+  "270": {
+    "inputs": {
+      "sampler_name": "euler"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "272": {
+    "inputs": {
+      "scheduler": "beta",
+      "steps": [
+        "278",
+        0
+      ],
+      "denoise": 1,
+      "model": [
+        "264",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基础调度器"
+    }
+  },
+  "273": {
+    "inputs": {
+      "noise": [
+        "276",
+        0
+      ],
+      "guider": [
+        "275",
+        0
+      ],
+      "sampler": [
+        "270",
+        0
+      ],
+      "sigmas": [
+        "315",
+        0
+      ],
+      "latent_image": [
+        "266",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器(高级)"
+    }
+  },
+  "275": {
+    "inputs": {
+      "model": [
+        "264",
+        0
+      ],
+      "conditioning": [
+        "266",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基础引导"
+    }
+  },
+  "276": {
+    "inputs": {
+      "noise_seed": 670
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "278": {
+    "inputs": {
+      "value": 10
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "采样步数"
+    }
+  },
+  "294": {
+    "inputs": {
+      "text": [
+        "266",
+        5
+      ]
+    },
+    "class_type": "FeiHouEasyH3PromptPreview",
+    "_meta": {
+      "title": "FeiHou Easy H3 提示词预览"
+    }
+  },
+  "296": {
+    "inputs": {
+      "samples": [
+        "273",
+        1
+      ],
+      "vae": [
+        "266",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "297": {
+    "inputs": {
+      "samples": [
+        "273",
+        1
+      ],
+      "vae": [
+        "266",
+        3
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "298": {
+    "inputs": {
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB",
+      "images": [
+        "296",
+        0
+      ],
+      "audio": [
+        "297",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "299": {
+    "inputs": {
+      "filename_prefix": "video/MiniMax_H3",
+      "format": "auto",
+      "format.codec": "auto",
+      "video": [
+        "298",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "300": {
+    "inputs": {
+      "tau": 1.3,
+      "start_percent": 0.2,
+      "end_percent": 0.9,
+      "min_tokens": 4096,
+      "int8_qk": true,
+      "sink_conditioning": "exact_kv_and_rows",
+      "morton": false,
+      "morton_curve": "2d_frame",
+      "int8_pv": true,
+      "verbose": false,
+      "use_tma": false,
+      "dense_blocks": "",
+      "model": [
+        "335",
+        0
+      ]
+    },
+    "class_type": "SolAttnPatch",
+    "_meta": {
+      "title": "Patch Sol-Attn"
+    }
+  },
+  "315": {
+    "inputs": {
+      "extra_steps": 1,
+      "start_at_sigma": 0.7,
+      "end_at_sigma": 0,
+      "spacing": "cosine",
+      "sigmas": [
+        "272",
+        0
+      ]
+    },
+    "class_type": "H3SigmaRefiner",
+    "_meta": {
+      "title": "H3 Sigma Refiner"
+    }
+  },
+  "335": {
+    "inputs": {
+      "mode": "image",
+      "prompt": "",
+      "resolution": "0.9",
+      "aspect_ratio": "16:9",
+      "width": 1344,
+      "height": 768,
+      "seconds": 10,
+      "advanced": true,
+      "fps": 24,
+      "keyframe_role": "first",
+      "ref_image_size": "max",
+      "reference_mention_mode": "index",
+      "prompt_optimizer_enabled": false,
+      "prompt_optimizer_provider": "custom_msufzrnf/gemini-3.7-flash-high",
+      "prompt_optimizer_scene_guide": "none",
+      "h3_bundle": [
+        "253",
+        0
+      ],
+      "prompt_optimizer_applied": false
+    },
+    "class_type": "FeiHouEasyH3",
+    "_meta": {
+      "title": "ComfyUI-FeiHou-Easy-H3"
+    }
+  }
+}

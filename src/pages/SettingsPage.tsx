@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { AppSettingsView, ComfyWorkflowInfo, VideoAnalysisProvider } from '../shared/ipc.types';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import type { AppSettingsView, ComfyWorkflowInfo, VideoAnalysisProvider, WorkflowFallbackSlot } from '../shared/ipc.types';
+import { normalizeWorkflowFallbackSlots } from '../shared/generation-fallback';
 import { useAppStore } from '../stores/app.store';
 import { clearCachedComfyWorkflows, listCachedComfyWorkflows } from '../shared/comfy-workflows';
 import { registerEditFlusher } from '../shared/pending-edits';
 import { GeminiProxySettingsCard } from './GeminiProxySettingsCard';
 import { GptGrokProxySettingsCard } from './GptGrokProxySettingsCard';
+import { workflowTypeLabel } from '../shared/reverse-proxy-workflows';
 
 const fieldClass = 'w-full rounded-lg border border-white/[0.1] bg-[#09090e] px-3.5 py-3 text-sm text-[#e8e6df] outline-none transition placeholder:text-[#4f4c59] focus:border-[#d4af37]/60 focus:ring-2 focus:ring-[#d4af37]/10';
 const DEFAULT_QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
@@ -39,6 +41,14 @@ function hasSeedreamSettingsSupport(settings: AppSettingsView): boolean {
     && typeof settings.seedreamApiKeyConfigured === 'boolean';
 }
 
+function hasDefaultVideoSettingsSupport(settings: AppSettingsView): boolean {
+  return typeof settings.defaultVideoWorkflowId === 'string'
+}
+
+function hasFallbackWorkflowSettingsSupport(settings: AppSettingsView): boolean {
+  return Array.isArray(settings.fallbackImageWorkflows) && Array.isArray(settings.fallbackVideoWorkflows)
+}
+
 function sameIdList(left: string[], right: string[]): boolean {
   return left.join('\n') === right.join('\n');
 }
@@ -68,6 +78,11 @@ export function SettingsPage() {
   const [showSeedreamApiKey, setShowSeedreamApiKey] = useState(false);
   const [clearSeedreamApiKey, setClearSeedreamApiKey] = useState(false);
   const [defaultImageWorkflowId, setDefaultImageWorkflowId] = useState('krea2-turbo-t2i');
+  const [defaultVideoWorkflowId, setDefaultVideoWorkflowId] = useState('minimax-h3-easy');
+  const [fallbackImageWorkflows, setFallbackImageWorkflows] = useState<WorkflowFallbackSlot[]>([]);
+  const [fallbackVideoWorkflows, setFallbackVideoWorkflows] = useState<WorkflowFallbackSlot[]>([]);
+  const [servicesOpen, setServicesOpen] = useState(true);
+  const [defaultsOpen, setDefaultsOpen] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -82,6 +97,9 @@ export function SettingsPage() {
     comfyuiBaseUrl !== savedSettings.comfyuiBaseUrl || qwenBaseUrl !== savedSettings.qwenBaseUrl
     || qwenApiKey !== savedSettings.qwenApiKey || seedreamBaseUrl !== savedSettings.seedreamBaseUrl
     || seedreamApiKey !== savedSettings.seedreamApiKey || defaultImageWorkflowId !== savedSettings.defaultImageWorkflowId
+    || defaultVideoWorkflowId !== savedSettings.defaultVideoWorkflowId
+    || JSON.stringify(fallbackImageWorkflows) !== JSON.stringify(savedSettings.fallbackImageWorkflows ?? [])
+    || JSON.stringify(fallbackVideoWorkflows) !== JSON.stringify(savedSettings.fallbackVideoWorkflows ?? [])
     || videoAnalysisProvider !== savedSettings.videoAnalysisProvider
     || geminiBaseUrl !== savedSettings.geminiBaseUrl
     || geminiApiKey !== savedSettings.geminiApiKey
@@ -120,8 +138,11 @@ export function SettingsPage() {
         setSeedreamBaseUrl(seedreamSettingsSupported ? settings.seedreamBaseUrl : DEFAULT_SEEDREAM_BASE_URL);
         setSeedreamApiKey(seedreamSettingsSupported ? settings.seedreamApiKey : '');
         setDefaultImageWorkflowId(settings.defaultImageWorkflowId);
+        setDefaultVideoWorkflowId(hasDefaultVideoSettingsSupport(settings) ? settings.defaultVideoWorkflowId : 'minimax-h3-easy');
+        setFallbackImageWorkflows(hasFallbackWorkflowSettingsSupport(settings) ? settings.fallbackImageWorkflows : []);
+        setFallbackVideoWorkflows(hasFallbackWorkflowSettingsSupport(settings) ? settings.fallbackVideoWorkflows : []);
         setWorkflows(availableWorkflows);
-        if (!qwenSettingsSupported || !geminiSettingsSupported || !gptGrokSettingsSupported || !seedreamSettingsSupported) {
+        if (!qwenSettingsSupported || !geminiSettingsSupported || !gptGrokSettingsSupported || !seedreamSettingsSupported || !hasDefaultVideoSettingsSupport(settings) || !hasFallbackWorkflowSettingsSupport(settings)) {
           setNotice('检测到 Electron 主进程仍是旧版本，新配置暂时无法保存。请完全退出应用后重新启动。');
         }
       })
@@ -131,6 +152,11 @@ export function SettingsPage() {
 
   const textToImageWorkflows = useMemo(
     () => workflows.filter((workflow) => workflow.kind === 'text-to-image'),
+    [workflows],
+  );
+
+  const imageToVideoWorkflows = useMemo(
+    () => workflows.filter((workflow) => workflow.kind === 'image-to-video'),
     [workflows],
   );
 
@@ -154,6 +180,9 @@ export function SettingsPage() {
         comfyuiBaseUrl,
         qwenBaseUrl,
         defaultImageWorkflowId,
+        defaultVideoWorkflowId,
+        fallbackImageWorkflows,
+        fallbackVideoWorkflows,
         qwenApiKey: qwenApiKey.trim() || undefined,
         clearQwenApiKey,
         seedreamBaseUrl,
@@ -184,6 +213,12 @@ export function SettingsPage() {
       if (!hasSeedreamSettingsSupport(next)) {
         throw new Error('Electron 主进程仍是旧版本，未接收 Seedream 配置。请完全退出应用后重新启动，再重新保存。');
       }
+      if (!hasDefaultVideoSettingsSupport(next)) {
+        throw new Error('Electron 主进程仍是旧版本，未接收默认视频模型配置。请完全退出应用后重新启动，再重新保存。');
+      }
+      if (!hasFallbackWorkflowSettingsSupport(next)) {
+        throw new Error('Electron 主进程仍是旧版本，未接收备用模型配置。请完全退出应用后重新启动，再重新保存。');
+      }
       if (qwenApiKey.trim() && !next.qwenApiKeyConfigured) {
         throw new Error('Qwen API Key 保存后校验失败，输入内容已保留，请重试。');
       }
@@ -200,6 +235,9 @@ export function SettingsPage() {
       setComfyuiBaseUrl(next.comfyuiBaseUrl);
       setQwenBaseUrl(next.qwenBaseUrl);
       setDefaultImageWorkflowId(next.defaultImageWorkflowId);
+      setDefaultVideoWorkflowId(next.defaultVideoWorkflowId);
+      setFallbackImageWorkflows(next.fallbackImageWorkflows);
+      setFallbackVideoWorkflows(next.fallbackVideoWorkflows);
       setQwenApiKey(next.qwenApiKey);
       setClearQwenApiKey(false);
       setVideoAnalysisProvider(next.videoAnalysisProvider);
@@ -279,12 +317,17 @@ export function SettingsPage() {
       </header>
 
       <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-7xl space-y-5 px-6 py-8 lg:px-8">
+        <div className="mx-auto max-w-7xl space-y-6 px-6 py-8 lg:px-8">
           {notice && <div className="rounded-lg border border-[#d4af37]/25 bg-[#d4af37]/[0.07] px-4 py-3 text-sm text-[#d9c178]">{notice}</div>}
 
-          <div className="space-y-5">
-            <div className="grid auto-rows-fr items-stretch gap-5 lg:grid-cols-1">
-              <SettingsCard title="ComfyUI 服务" description="本地图片工作流、视频生成与视频放大请求发送到此服务器。修改后可先测试连接。">
+          <SettingsSection
+            title="模型与服务"
+            description="ComfyUI、审查后端、云端生图/生视频网关。日常只需展开当前在用的那张卡。"
+            open={servicesOpen}
+            onToggle={() => setServicesOpen((value) => !value)}
+          >
+            <div className="grid gap-4 lg:grid-cols-2">
+              <SettingsCard title="ComfyUI 服务" description="本地图片工作流、视频生成与视频放大请求发送到此服务器。">
                 <label className="text-xs tracking-wider text-[#9a97a3]">HTTP 地址</label>
                 <div className="mt-2 flex gap-3">
                   <input aria-label="ComfyUI HTTP 地址" value={comfyuiBaseUrl} onChange={(event) => { setComfyuiBaseUrl(event.target.value); setTestResult(null); }} className={fieldClass} placeholder="http://127.0.0.1:8188" spellCheck={false} />
@@ -294,10 +337,8 @@ export function SettingsPage() {
                 </div>
                 {testResult && <p className={`mt-2.5 text-xs ${testResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>{testResult.message}</p>}
               </SettingsCard>
-            </div>
 
-            <div className="grid auto-rows-fr items-stretch gap-5 xl:grid-cols-3">
-              <SettingsCard title="Qwen 音视频审查" description="固定使用 Qwen3.5-Omni Plus 同时理解视频画面、对白、环境音和音效，并输出带时间戳的审查报告。API Key 保存在本机，重新打开设置页时会自动回填。">
+              <SettingsCard title="Qwen 音视频审查" description="固定使用 Qwen3.5-Omni Plus 同时理解画面与音轨。API Key 保存在本机。">
                 <div className="grid gap-5">
                   <div>
                     <label className="text-xs tracking-wider text-[#9a97a3]">OpenAI 兼容 API 地址</label>
@@ -329,33 +370,35 @@ export function SettingsPage() {
                     </button>
                     {qwenTestResult && <p className={`text-xs ${qwenTestResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>{qwenTestResult.message}</p>}
                   </div>
-                  <p className="text-[11px] leading-5 text-[#5f5c68]">审查服务固定使用 qwen3.5-omni-plus，同时理解画面与完整音轨。默认使用中国大陆 DashScope 端点；其他地域需填写与 API Key 所属地域一致的 Base URL。</p>
                 </div>
               </SettingsCard>
 
-              <GeminiProxySettingsCard
-                videoAnalysisProvider={videoAnalysisProvider}
-                onVideoAnalysisProviderChange={setVideoAnalysisProvider}
-                geminiBaseUrl={geminiBaseUrl}
-                onGeminiBaseUrlChange={setGeminiBaseUrl}
-                geminiApiKey={geminiApiKey}
-                onGeminiApiKeyChange={setGeminiApiKey}
-                clearGeminiApiKey={clearGeminiApiKey}
-                onClearGeminiApiKeyChange={setClearGeminiApiKey}
-                geminiApiKeyConfigured={!!savedSettings?.geminiApiKeyConfigured}
-                geminiAnalysisModelId={geminiAnalysisModelId}
-                onGeminiAnalysisModelIdChange={setGeminiAnalysisModelId}
-                geminiEnabledImageModelIds={geminiEnabledImageModelIds}
-                onGeminiEnabledImageModelIdsChange={setGeminiEnabledImageModelIds}
-                fieldClass={fieldClass}
-              />
+              <SettingsCard title="Gemini 反代" description="独立 Base URL 与 Key。获取模型只刷新本卡片，不写入设置。">
+                <GeminiProxySettingsCard
+                  videoAnalysisProvider={videoAnalysisProvider}
+                  onVideoAnalysisProviderChange={setVideoAnalysisProvider}
+                  geminiBaseUrl={geminiBaseUrl}
+                  onGeminiBaseUrlChange={setGeminiBaseUrl}
+                  geminiApiKey={geminiApiKey}
+                  onGeminiApiKeyChange={setGeminiApiKey}
+                  clearGeminiApiKey={clearGeminiApiKey}
+                  onClearGeminiApiKeyChange={setClearGeminiApiKey}
+                  geminiApiKeyConfigured={!!savedSettings?.geminiApiKeyConfigured}
+                  geminiAnalysisModelId={geminiAnalysisModelId}
+                  onGeminiAnalysisModelIdChange={setGeminiAnalysisModelId}
+                  geminiEnabledImageModelIds={geminiEnabledImageModelIds}
+                  onGeminiEnabledImageModelIdsChange={setGeminiEnabledImageModelIds}
+                  fieldClass={fieldClass}
+                  bare
+                />
+              </SettingsCard>
 
-              <SettingsCard title="方舟图片 / 视频生成" description="使用同一套方舟 Base URL 与 API Key 调用 Seedream 5.0 图片生成和 Seedance 2.0 全模态视频生成；Agent Plan 使用专属地址与 Key。">
+              <SettingsCard title="方舟图片 / 视频" description="同一套 Base URL 与 Key 调用 Seedream 生图和 Seedance 生视频。">
                 <div className="grid gap-5">
                   <div>
                     <label className="text-xs tracking-wider text-[#9a97a3]">方舟 API Base URL</label>
                     <input aria-label="火山方舟 API 地址" value={seedreamBaseUrl} onChange={(event) => { setSeedreamBaseUrl(event.target.value); setSeedreamTestResult(null); }} className={`${fieldClass} mt-2`} placeholder={DEFAULT_SEEDREAM_BASE_URL} spellCheck={false} />
-                    <p className="mt-2 text-[11px] leading-5 text-[#5f5c68]">普通 API 填 <span className="font-mono">…/api/v3</span>，Agent Plan 填 <span className="font-mono">…/api/plan/v3</span>；无需附加 <span className="font-mono">/images/generations</span>，粘贴完整地址时会自动移除。</p>
+                    <p className="mt-2 text-[11px] leading-5 text-[#5f5c68]">普通 API 填 <span className="font-mono">…/api/v3</span>，Agent Plan 填 <span className="font-mono">…/api/plan/v3</span>。</p>
                   </div>
                   <div>
                     <div className="flex items-center justify-between">
@@ -379,45 +422,70 @@ export function SettingsPage() {
                     </button>
                     {seedreamTestResult && <p className={`text-xs ${seedreamTestResult.success ? 'text-emerald-400' : 'text-rose-400'}`}>{seedreamTestResult.message}</p>}
                   </div>
-                  <p className="text-[11px] leading-5 text-[#5f5c68]">图片：Seedream 5.0 Pro / Lite；视频：Seedance 2.0（Agent Plan，720p、4–15 秒、同步音频）。API Key 明文保存在本机 settings.json，也可通过 ARK_API_KEY 环境变量提供。</p>
                 </div>
               </SettingsCard>
-            </div>
 
-            <div className="grid auto-rows-fr items-stretch gap-5 xl:grid-cols-3">
-              <GptGrokProxySettingsCard
-                gptGrokBaseUrl={gptGrokBaseUrl}
-                onGptGrokBaseUrlChange={setGptGrokBaseUrl}
-                gptGrokApiKey={gptGrokApiKey}
-                onGptGrokApiKeyChange={setGptGrokApiKey}
-                clearGptGrokApiKey={clearGptGrokApiKey}
-                onClearGptGrokApiKeyChange={setClearGptGrokApiKey}
-                gptGrokApiKeyConfigured={!!savedSettings?.gptGrokApiKeyConfigured}
-                gptGrokEnabledImageModelIds={gptGrokEnabledImageModelIds}
-                onGptGrokEnabledImageModelIdsChange={setGptGrokEnabledImageModelIds}
-                gptGrokEnabledVideoModelIds={gptGrokEnabledVideoModelIds}
-                onGptGrokEnabledVideoModelIdsChange={setGptGrokEnabledVideoModelIds}
-                fieldClass={fieldClass}
-              />
+              <SettingsCard title="GPT / Grok 反代" description="独立于 Gemini 的 OpenAI 兼容网关。获取模型只刷新本卡片。">
+                <GptGrokProxySettingsCard
+                  gptGrokBaseUrl={gptGrokBaseUrl}
+                  onGptGrokBaseUrlChange={setGptGrokBaseUrl}
+                  gptGrokApiKey={gptGrokApiKey}
+                  onGptGrokApiKeyChange={setGptGrokApiKey}
+                  clearGptGrokApiKey={clearGptGrokApiKey}
+                  onClearGptGrokApiKeyChange={setClearGptGrokApiKey}
+                  gptGrokApiKeyConfigured={!!savedSettings?.gptGrokApiKeyConfigured}
+                  gptGrokEnabledImageModelIds={gptGrokEnabledImageModelIds}
+                  onGptGrokEnabledImageModelIdsChange={setGptGrokEnabledImageModelIds}
+                  gptGrokEnabledVideoModelIds={gptGrokEnabledVideoModelIds}
+                  onGptGrokEnabledVideoModelIdsChange={setGptGrokEnabledVideoModelIds}
+                  fieldClass={fieldClass}
+                  bare
+                />
+              </SettingsCard>
             </div>
-          </div>
+          </SettingsSection>
 
-          <SettingsCard title="默认生图模型" description="新建图片节点及未单独指定模型的生成任务默认使用此工作流。">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {textToImageWorkflows.map((workflow) => {
-                const selected = workflow.id === defaultImageWorkflowId;
-                return (
-                  <button key={workflow.id} onClick={() => setDefaultImageWorkflowId(workflow.id)} className={`rounded-xl border p-4 text-left transition ${selected ? 'border-[#d4af37]/65 bg-[#d4af37]/[0.09] shadow-[0_0_20px_rgba(212,175,55,0.08)]' : 'border-white/[0.09] bg-white/[0.025] hover:border-white/[0.18]'}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <span className={`text-sm font-medium ${selected ? 'text-[#e8c766]' : 'text-[#d8d6cf]'}`}>{workflow.name}</span>
-                      <span className={`h-3.5 w-3.5 rounded-full border ${selected ? 'border-[#e8c766] bg-[#e8c766] shadow-[inset_0_0_0_3px_#18140b]' : 'border-[#5f5c68]'}`} />
-                    </div>
-                    <p className="mt-2 font-mono text-[10px] text-[#666371]">{workflow.id}</p>
-                  </button>
-                );
-              })}
+          <SettingsSection
+            title="默认生成模型"
+            description="新建节点写入默认项。默认因网络、额度或 503 失败时，生成会自动切备用1、备用2。"
+            open={defaultsOpen}
+            onToggle={() => setDefaultsOpen((value) => !value)}
+          >
+            <div className="grid gap-4 xl:grid-cols-2">
+              <SettingsCard title="默认图片模型" description="新建图片节点、Codex 生图都走这一项；失败再走下面备用。">
+                <WorkflowPicker
+                  workflows={textToImageWorkflows}
+                  selectedId={defaultImageWorkflowId}
+                  onSelect={(id) => {
+                    setDefaultImageWorkflowId(id)
+                    setFallbackImageWorkflows(normalizeWorkflowFallbackSlots(id, fallbackImageWorkflows))
+                  }}
+                />
+                <FallbackSlotList
+                  workflows={textToImageWorkflows}
+                  defaultId={defaultImageWorkflowId}
+                  slots={fallbackImageWorkflows}
+                  onChange={setFallbackImageWorkflows}
+                />
+              </SettingsCard>
+              <SettingsCard title="默认视频模型" description="新建视频节点、Codex 生视频都走这一项；失败再走下面备用。">
+                <WorkflowPicker
+                  workflows={imageToVideoWorkflows}
+                  selectedId={defaultVideoWorkflowId}
+                  onSelect={(id) => {
+                    setDefaultVideoWorkflowId(id)
+                    setFallbackVideoWorkflows(normalizeWorkflowFallbackSlots(id, fallbackVideoWorkflows))
+                  }}
+                />
+                <FallbackSlotList
+                  workflows={imageToVideoWorkflows}
+                  defaultId={defaultVideoWorkflowId}
+                  slots={fallbackVideoWorkflows}
+                  onChange={setFallbackVideoWorkflows}
+                />
+              </SettingsCard>
             </div>
-          </SettingsCard>
+          </SettingsSection>
         </div>
       </main>
       {leaveOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-6 app-no-drag">
@@ -435,7 +503,7 @@ export function SettingsPage() {
   );
 }
 
-function SettingsCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function SettingsCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
     <section className="flex h-full min-w-0 flex-col rounded-2xl border border-white/[0.08] bg-[#111118] p-6 shadow-[0_16px_50px_rgba(0,0,0,0.18)]">
       <div className="mb-5 border-b border-white/[0.07] pb-4">
@@ -445,4 +513,126 @@ function SettingsCard({ title, description, children }: { title: string; descrip
       <div className="flex-1">{children}</div>
     </section>
   );
+}
+
+function SettingsSection({
+  title,
+  description,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string
+  description: string
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0d0d14]">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-start justify-between gap-4 px-5 py-4 text-left transition hover:bg-white/[0.03]"
+      >
+        <span>
+          <span className="block text-sm font-semibold tracking-[0.16em] text-[#e8e6df]">{title}</span>
+          <span className="mt-1.5 block text-xs leading-5 text-[#777482]">{description}</span>
+        </span>
+        <span className={`mt-1 text-[#9a97a3] transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden>▾</span>
+      </button>
+      {open && <div className="border-t border-white/[0.06] px-5 py-5">{children}</div>}
+    </section>
+  )
+}
+
+function WorkflowPicker({
+  workflows,
+  selectedId,
+  onSelect,
+}: {
+  workflows: ComfyWorkflowInfo[]
+  selectedId: string
+  onSelect: (id: string) => void
+}) {
+  if (workflows.length === 0) {
+    return <p className="text-xs text-[#777482]">暂无可用工作流。先在上方配置对应服务后保存。</p>
+  }
+  return (
+    <div className="grid gap-2">
+      {workflows.map((workflow) => {
+        const selected = workflow.id === selectedId
+        return (
+          <button
+            key={workflow.id}
+            type="button"
+            onClick={() => onSelect(workflow.id)}
+            className={`rounded-xl border px-4 py-3 text-left transition ${selected ? 'border-[#d4af37]/65 bg-[#d4af37]/[0.09]' : 'border-white/[0.09] bg-white/[0.025] hover:border-white/[0.18]'}`}
+          >
+            <span className="flex items-center justify-between gap-3">
+              <span className={`min-w-0 text-sm font-medium ${selected ? 'text-[#e8c766]' : 'text-[#d8d6cf]'}`}>{workflow.name}</span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] text-[#9a97a3]">{workflowTypeLabel(workflow)}</span>
+                <span className={`h-3.5 w-3.5 rounded-full border ${selected ? 'border-[#e8c766] bg-[#e8c766] shadow-[inset_0_0_0_3px_#18140b]' : 'border-[#5f5c68]'}`} />
+              </span>
+            </span>
+            <span className="mt-1.5 block font-mono text-[10px] text-[#666371]">{workflow.id}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function FallbackSlotList({
+  workflows,
+  defaultId,
+  slots,
+  onChange,
+}: {
+  workflows: ComfyWorkflowInfo[]
+  defaultId: string
+  slots: WorkflowFallbackSlot[]
+  onChange: (slots: WorkflowFallbackSlot[]) => void
+}) {
+  const rows = [slots[0] ?? { id: '', note: '' }, slots[1] ?? { id: '', note: '' }]
+  const update = (index: number, next: WorkflowFallbackSlot) => {
+    const copy = [...rows]
+    copy[index] = next
+    onChange(normalizeWorkflowFallbackSlots(defaultId, copy))
+  }
+  return (
+    <div className="mt-4 grid gap-3 border-t border-white/[0.06] pt-4">
+      {rows.map((slot, index) => {
+        const otherId = rows[1 - index]?.id
+        return (
+          <label key={index} className="grid gap-1.5">
+            <span className="text-[11px] text-[#9a97a3]">备用{index + 1}</span>
+            <select
+              value={slot.id}
+              onChange={(event) => update(index, { id: event.target.value, note: slot.note })}
+              className={fieldClass}
+            >
+              <option value="">不启用</option>
+              {workflows
+                .filter((workflow) => workflow.id === slot.id || (workflow.id !== defaultId && workflow.id !== otherId))
+                .map((workflow) => (
+                  <option key={workflow.id} value={workflow.id}>{workflow.name}</option>
+                ))}
+            </select>
+            {slot.id ? (
+              <input
+                value={slot.note}
+                maxLength={40}
+                placeholder="备注，例如额度更稳 / 本地 ComfyUI"
+                onChange={(event) => update(index, { id: slot.id, note: event.target.value })}
+                className={fieldClass}
+              />
+            ) : null}
+          </label>
+        )
+      })}
+    </div>
+  )
 }

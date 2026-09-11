@@ -15,6 +15,14 @@ describe('Codex canvas MCP integration',()=>{
  expect(result.isError).not.toBe(true);expect(command).toHaveBeenCalledWith('project-one','get-node',{nodeId:'node-7'});
  const invalid=await client.callTool({name:'GetCanvasNode',arguments:{}});expect(invalid.isError).toBe(true);expect(command).toHaveBeenCalledTimes(1);
  });
+ it('tells the agent to stop on generationStatus error',async()=>{
+ const {client}=await setup('project-one');const list=await client.listTools();
+ const invoke=list.tools.find(tool=>tool.name==='InvokeNodeAction');
+ expect(invoke?.description).toContain('generationStatus=error is the only failure of that node');
+ expect(invoke?.description).toContain('Do not interrupt unrelated sibling nodes');
+ expect(invoke?.description).toContain('Do not pick 备用1/备用2 yourself');
+ expect(invoke?.description).not.toContain('leaves the busy state (idle or error)');
+ });
  it('rejects unauthenticated, cross-project and browser-origin requests and stops tool writes',async()=>{
  let active=true;const one=await setup('one',()=>active);const two=await setup('two');
  expect((await fetch(one.bridge.url)).status).toBe(401);

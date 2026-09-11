@@ -54,6 +54,47 @@ describe('settings secret persistence', () => {
     expect(stored).not.toContain('encryptedSeedreamApiKey')
   })
 
+  it('persists the default video workflow separately from the image default', async () => {
+    const saved = await saveAppSettings({
+      comfyuiBaseUrl: 'http://127.0.0.1:8188',
+      agentBaseUrl: '',
+      qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      defaultImageWorkflowId: 'z-image-turbo-t2i',
+      defaultVideoWorkflowId: 'minimax-h3-easy-2pass',
+      googleAiProxyUrl: '',
+      seedreamBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    })
+    expect(saved.defaultImageWorkflowId).toBe('z-image-turbo-t2i')
+    expect(saved.defaultVideoWorkflowId).toBe('minimax-h3-easy-2pass')
+    const reloaded = await getAppSettingsView()
+    expect(reloaded.defaultVideoWorkflowId).toBe('minimax-h3-easy-2pass')
+    expect(reloaded.fallbackImageWorkflows).toEqual([])
+    expect(reloaded.fallbackVideoWorkflows).toEqual([])
+  })
+
+  it('persists two labeled backup models and drops duplicates of the default', async () => {
+    const saved = await saveAppSettings({
+      comfyuiBaseUrl: 'http://127.0.0.1:8188',
+      agentBaseUrl: '',
+      qwenBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+      defaultImageWorkflowId: 'krea2-turbo-t2i',
+      defaultVideoWorkflowId: 'minimax-h3-easy',
+      fallbackImageWorkflows: [
+        { id: 'krea2-turbo-t2i', note: 'same as default' },
+        { id: 'gemini-proxy-image:gemini-3.1-flash-image', note: '额度更稳' },
+        { id: 'z-image-turbo-t2i', note: '本地' },
+      ],
+      fallbackVideoWorkflows: [{ id: 'seedance-2.0', note: '云备用' }],
+      googleAiProxyUrl: '',
+      seedreamBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    })
+    expect(saved.fallbackImageWorkflows).toEqual([
+      { id: 'gemini-proxy-image:gemini-3.1-flash-image', note: '额度更稳' },
+      { id: 'z-image-turbo-t2i', note: '本地' },
+    ])
+    expect(saved.fallbackVideoWorkflows).toEqual([{ id: 'seedance-2.0', note: '云备用' }])
+  })
+
   it('normalizes Seedream image endpoints to their API base URL', () => {
     expect(normalizeSeedreamBaseUrl('https://ark.cn-beijing.volces.com/api/v3/images/generations'))
       .toBe('https://ark.cn-beijing.volces.com/api/v3')

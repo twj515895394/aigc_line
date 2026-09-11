@@ -100,7 +100,7 @@ These are authored spatial paths, not NavMesh pathfinding. The stage does not ye
 
 Only image nodes connected into the director node and carrying a `sourcePath` appear in the reference panel. The current multimodal conversation Agent reads the selected image directly—no separate vision model—and applies a strict `apply-scene-draft` containing up to 40 editable `box / wall / cylinder / sphere / floor / platform / stairs / ramp / cone / capsule` elements.
 
-Rebuilding from the same image replaces only unlocked geometry created from that reference, preserving actors, manual elements, geometry from other images, and all cameras. The Agent can also use atomic `add-element`, `add-shot`, `set-actor-path`, `set-camera-constraint`, and `set-camera-keyframe` actions.
+Rebuilding from the same image replaces only unlocked geometry created from that reference, preserving actors, manual elements, geometry from other images, and all cameras. The Agent can also use atomic `add-element`, `add-shot`, `set-actor-path`, `set-camera-constraint`, `set-camera-keyframe`, `apply-scene-draft`, `capture-still`, and `export-video` actions. Capture/export opens the 3D stage and creates connected read-only image or video nodes.
 
 ### Autosave and outputs
 
@@ -132,6 +132,8 @@ Rebuilding from the same image replaces only unlocked geometry created from that
 | Nano Banana Pro (Google API) | Text/image to image, 2K | — |
 | Doubao-Seedream-5.0-pro (Volcengine Ark API) | Text/image to image, 2K | — |
 | Doubao-Seedream-5.0-lite (Volcengine Ark API) | Text/image to image, 2K | — |
+| MiniMax H3 Easy | Text / first-last / multimodal reference, 10 steps | — |
+| MiniMax H3 Easy 2-pass | Text / first-last / multimodal reference, higher quality, slower, manual | — |
 | MiniMax H3 | Text / first-last-frame to video | — |
 | MiniMax H3 Reference | Images / videos / audio to video | — |
 | RTX Video Super Resolution | Video upscale | 2× / 3× / 4× |
@@ -150,9 +152,11 @@ MiniMax H3 output sizes:
 
 | Aspect ratio | Resolution |
 |---|---:|
-| 16:9 | 1024 × 576 |
-| 4:3 | 1024 × 768 |
-| 1:1 | 1024 × 1024 |
+| 16:9 | 1344 × 768 |
+| 9:16 | 768 × 1344 |
+| 4:3 | 1152 × 864 |
+| 3:4 | 864 × 1152 |
+| 1:1 | 992 × 992 |
 
 ## Settings
 
@@ -202,7 +206,7 @@ pnpm build
 │   │       └── project.store.ts    # Project, chat, and canvas persistence
 │   └── preload/                    # Secure electronAPI bridge
 ├── resources/comfyui-workflows/    # ComfyUI API workflow templates
-├── resources/claude-plugin/        # App-owned Claude Plugin and built-in skills
+├── resources/claude-plugin/        # App-owned Claude Plugin; image/video-prompt-skill are git submodules
 ├── src/
 │   ├── components/CanvasArea.tsx   # React Flow canvas and generation nodes
 │   ├── pages/                      # Home, project, and settings pages

@@ -17,6 +17,7 @@ import type {
   ImageAspectRatio,
   UpscaleVideoRequest,
   UpscaleVideoResult,
+  WorkflowFallbackRole,
 } from '../../../src/shared/ipc.types'
 import {
   imageDimensionsFor,
@@ -95,10 +96,32 @@ const WORKFLOW_TEMPLATES: WorkflowTemplate[] = [
 
 interface VideoWorkflowTemplate extends ComfyWorkflowInfo {
   file: string
-  mode: 'first-last' | 'reference'
+  mode: 'first-last' | 'reference' | 'easy-h3'
+  easyH3?: {
+    saveNode: string
+    totalSteps: number
+    firstPassSteps?: number
+    swapTurboLora: boolean
+  }
 }
 
 const VIDEO_WORKFLOWS: VideoWorkflowTemplate[] = [
+  {
+    id: 'minimax-h3-easy',
+    name: 'MiniMax H3 · 一采（文生 / 图生 / 参考）',
+    kind: 'image-to-video',
+    file: 'minimax easy h3 一采.json',
+    mode: 'easy-h3',
+    easyH3: { saveNode: '299', totalSteps: 10, swapTurboLora: true },
+  },
+  {
+    id: 'minimax-h3-easy-2pass',
+    name: 'MiniMax H3 · 二采（高质量，更慢）',
+    kind: 'image-to-video',
+    file: 'Minimax easy h3 二采.json',
+    mode: 'easy-h3',
+    easyH3: { saveNode: '291', totalSteps: 9, firstPassSteps: 6, swapTurboLora: false },
+  },
   {
     id: 'minimax-h3-t2v-flf2v',
     name: 'MiniMax H3 · 文生视频 / 首尾帧',
@@ -122,6 +145,49 @@ const VIDEO_WORKFLOWS: VideoWorkflowTemplate[] = [
   },
 ]
 
+const H3_FL2V_TURBO_LORA = 'minimax\\minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors'
+const H3_REF2V_TURBO_LORA = 'minimax\\minimax_h3_ref2v_turbo_8step_v1.0_768p_comfyui_bf16.safetensors'
+
+const workflowRole = (
+  workflow: { id: string; kind: string },
+  settings: {
+    defaultImageWorkflowId: string
+    defaultVideoWorkflowId: string
+    fallbackImageWorkflows: Array<{ id: string; note: string }>
+    fallbackVideoWorkflows: Array<{ id: string; note: string }>
+  },
+): WorkflowFallbackRole | undefined => {
+  if (workflow.kind === 'text-to-image') {
+    if (workflow.id === settings.defaultImageWorkflowId) return 'default'
+    if (workflow.id === settings.fallbackImageWorkflows?.[0]?.id) return 'fallback-1'
+    if (workflow.id === settings.fallbackImageWorkflows?.[1]?.id) return 'fallback-2'
+  }
+  if (workflow.kind === 'image-to-video') {
+    if (workflow.id === settings.defaultVideoWorkflowId) return 'default'
+    if (workflow.id === settings.fallbackVideoWorkflows?.[0]?.id) return 'fallback-1'
+    if (workflow.id === settings.fallbackVideoWorkflows?.[1]?.id) return 'fallback-2'
+  }
+  return undefined
+}
+
+const workflowFallbackNote = (
+  role: WorkflowFallbackRole | undefined,
+  settings: {
+    fallbackImageWorkflows: Array<{ id: string; note: string }>
+    fallbackVideoWorkflows: Array<{ id: string; note: string }>
+  },
+  kind: string,
+): string | undefined => {
+  const slots = kind === 'text-to-image' ? settings.fallbackImageWorkflows ?? [] : settings.fallbackVideoWorkflows ?? []
+  if (role === 'fallback-1') return slots[0]?.note || undefined
+  if (role === 'fallback-2') return slots[1]?.note || undefined
+  return undefined
+}
+
+const roleRank = (role?: WorkflowFallbackRole) => (
+  role === 'default' ? 3 : role === 'fallback-1' ? 2 : role === 'fallback-2' ? 1 : 0
+)
+
 export const listComfyWorkflows = async (): Promise<ComfyWorkflowInfo[]> => {
   const settings = await getRuntimeSettings()
   const googleImageWorkflows: ComfyWorkflowInfo[] = GOOGLE_IMAGE_MODELS.map(({ id, name }) => ({
@@ -141,8 +207,18 @@ export const listComfyWorkflows = async (): Promise<ComfyWorkflowInfo[]> => {
   }))
   const reverseProxyWorkflows = listEnabledReverseProxyWorkflows(settings)
   return [...WORKFLOW_TEMPLATES, ...googleImageWorkflows, ...seedreamImageWorkflows, ...VIDEO_WORKFLOWS, ...seedanceVideoWorkflows, ...reverseProxyWorkflows]
-    .sort((a, b) => Number(b.id === settings.defaultImageWorkflowId) - Number(a.id === settings.defaultImageWorkflowId))
-    .map(({ id, name, kind }) => ({ id, name, kind }))
+    .sort((a, b) => roleRank(workflowRole(b, settings)) - roleRank(workflowRole(a, settings)))
+    .map(({ id, name, kind }) => {
+      const role = workflowRole({ id, kind }, settings)
+      return {
+        id,
+        name,
+        kind,
+        recommended: role === 'default' || undefined,
+        role,
+        fallbackNote: workflowFallbackNote(role, settings, kind),
+      }
+    })
 }
 
 const REQUEST_TIMEOUT_MS = 20_000
@@ -700,6 +776,84 @@ export async function upscaleVideoWithComfyUI(
   })
 }
 
+const H3_EASY_IMAGE_SLOTS = 9
+const H3_EASY_VIDEO_SLOTS = 3
+const H3_EASY_AUDIO_SLOTS = 3
+
+
+async function injectEasyH3Workflow(
+  workflow: ComfyWorkflow,
+  request: GenerateVideoRequest,
+  setInput: (nodeId: string, field: string, value: unknown) => void,
+  upload: (relativePath: string) => Promise<string>,
+  safeNodeId: string,
+  easyH3: NonNullable<VideoWorkflowTemplate['easyH3']>,
+): Promise<void> {
+  const imagePaths = (request.referenceImagePaths ?? []).filter(Boolean)
+  const videoPaths = (request.referenceVideoPaths ?? []).filter(Boolean)
+  const audioPaths = (request.referenceAudioPaths ?? []).filter(Boolean)
+  if (imagePaths.length > H3_EASY_IMAGE_SLOTS) throw new Error('MiniMax H3 全模态参考最多连接 9 张图片')
+  if (videoPaths.length > H3_EASY_VIDEO_SLOTS) throw new Error('MiniMax H3 全模态参考最多连接 3 个视频')
+  if (audioPaths.length > H3_EASY_AUDIO_SLOTS) throw new Error('MiniMax H3 全模态参考最多连接 3 段独立音频')
+
+  const useReference = imagePaths.length + videoPaths.length + audioPaths.length > 0
+  const duration = normalizeVideoDuration(request.duration)
+  const dimensions = videoDimensionsFor(request.aspectRatio)
+  const seed = Math.floor(Math.random() * 1_000_000_000_000_000)
+
+  setInput('335', 'prompt', request.prompt.trim())
+  setInput('335', 'mode', useReference ? 'reference' : 'image')
+  setInput('335', 'seconds', duration)
+  setInput('335', 'aspect_ratio', request.aspectRatio === '3:4' || request.aspectRatio === '9:16' || request.aspectRatio === '1:1' || request.aspectRatio === '4:3' ? request.aspectRatio : '16:9')
+  setInput('335', 'width', dimensions.width)
+  setInput('335', 'height', dimensions.height)
+  setInput('335', 'resolution', '0.98')
+  setInput('335', 'advanced', true)
+  setInput('335', 'fps', 24)
+  setInput('335', 'ref_image_size', 'max')
+  setInput('335', 'reference_mention_mode', 'index')
+  setInput('335', 'prompt_optimizer_enabled', false)
+  setInput('335', 'prompt_optimizer_applied', false)
+  setInput('335', 'keyframe_role', !request.referenceImagePath && request.lastFrameImagePath ? 'last' : 'first')
+  if (easyH3.swapTurboLora) setInput('265', 'lora_name', useReference ? H3_REF2V_TURBO_LORA : H3_FL2V_TURBO_LORA)
+  setInput('278', 'value', easyH3.totalSteps)
+  if (easyH3.firstPassSteps != null) setInput('279', 'value', easyH3.firstPassSteps)
+  setInput('276', 'noise_seed', seed)
+  setInput(easyH3.saveNode, 'filename_prefix', `aigc-canvas/video/${safeNodeId}`)
+  setInput(easyH3.saveNode, 'format', 'mp4')
+  setInput(easyH3.saveNode, 'format.codec', 'h264')
+
+  if (useReference) {
+    for (const [index, relativePath] of imagePaths.entries()) {
+      const nodeId = String(910001 + index)
+      workflow[nodeId] = { class_type: 'LoadImage', inputs: { image: await upload(relativePath) } }
+      setInput('335', `image_${index + 1}`, [nodeId, 0])
+    }
+    for (const [index, relativePath] of videoPaths.entries()) {
+      const nodeId = String(920001 + index)
+      workflow[nodeId] = { class_type: 'LoadVideo', inputs: { file: await upload(relativePath) } }
+      setInput('335', `video_${index + 1}`, [nodeId, 0])
+    }
+    for (const [index, relativePath] of audioPaths.entries()) {
+      const nodeId = String(930001 + index)
+      workflow[nodeId] = { class_type: 'LoadAudio', inputs: { audio: await upload(relativePath) } }
+      setInput('335', `audio_${index + 1}`, [nodeId, 0])
+    }
+    return
+  }
+
+  const frameInputs = [
+    ['image_1', request.referenceImagePath],
+    ['image_2', request.lastFrameImagePath],
+  ] as const
+  for (const [index, [field, relativePath]] of frameInputs.entries()) {
+    if (!relativePath) continue
+    const nodeId = String(900001 + index)
+    workflow[nodeId] = { class_type: 'LoadImage', inputs: { image: await upload(relativePath) } }
+    setInput('335', field, [nodeId, 0])
+  }
+}
+
 export async function generateVideoWithComfyUI(
   request: GenerateVideoRequest,
 ): Promise<GenerateVideoResult> {
@@ -726,7 +880,17 @@ export async function generateVideoWithComfyUI(
       const videoPaths = (request.referenceVideoPaths ?? []).filter(Boolean)
       const audioPaths = (request.referenceAudioPaths ?? []).filter(Boolean)
 
-      if (template.mode === 'first-last') {
+      if (template.mode === 'easy-h3') {
+        if (!template.easyH3) throw new Error(`${template.name} 缺少一采/二采注入配置`)
+        await injectEasyH3Workflow(
+          workflow,
+          request,
+          setInput,
+          (relativePath) => uploadReferenceMedia(baseUrl, project.folderPath, relativePath),
+          safeNodeId,
+          template.easyH3,
+        )
+      } else if (template.mode === 'first-last') {
         setInput('105:104', 'prompt', request.prompt.trim())
         setInput('105:104', 'width', dimensions.width)
         setInput('105:104', 'height', dimensions.height)
@@ -781,9 +945,11 @@ export async function generateVideoWithComfyUI(
         }
       }
 
-      setInput('92', 'filename_prefix', `aigc-canvas/video/${safeNodeId}`)
-      setInput('92', 'format', 'mp4')
-      setInput('92', 'codec', 'h264')
+      if (template.mode !== 'easy-h3') {
+        setInput('92', 'filename_prefix', `aigc-canvas/video/${safeNodeId}`)
+        setInput('92', 'format', 'mp4')
+        setInput('92', 'codec', 'h264')
+      }
 
       markSubmitting()
       const queued = await fetchJson<{ prompt_id?: string; error?: unknown }>(`${baseUrl}/prompt`, {

@@ -17,6 +17,7 @@ export interface GeminiProxySettingsCardProps {
   geminiEnabledImageModelIds: string[];
   onGeminiEnabledImageModelIdsChange: (ids: string[]) => void;
   fieldClass: string;
+  bare?: boolean;
 }
 
 export function GeminiProxySettingsCard({
@@ -34,6 +35,7 @@ export function GeminiProxySettingsCard({
   geminiEnabledImageModelIds,
   onGeminiEnabledImageModelIdsChange,
   fieldClass,
+  bare,
 }: GeminiProxySettingsCardProps) {
   const [showGeminiApiKey, setShowGeminiApiKey] = useState(false);
   const [models, setModels] = useState<ReverseProxyModel[]>([]);
@@ -94,13 +96,7 @@ export function GeminiProxySettingsCard({
     onGeminiEnabledImageModelIdsChange(geminiEnabledImageModelIds.filter((item) => item !== id));
   };
 
-  return (
-    <section className="flex h-full min-w-0 flex-col rounded-2xl border border-white/[0.08] bg-[#111118] p-6 shadow-[0_16px_50px_rgba(0,0,0,0.18)]">
-      <div className="mb-5 border-b border-white/[0.07] pb-4">
-        <h2 className="text-sm font-semibold tracking-[0.14em] text-[#e8e6df]">Gemini 反代</h2>
-        <p className="mt-2 text-xs leading-5 text-[#777482]">填写独立 Base URL 与 API Key，从网关获取模型后选择分析模型并勾选生图。获取模型只刷新本卡片列表，不会写入设置文件。</p>
-      </div>
-      <div className="flex-1">
+  const body = (
         <div className="grid gap-5">
           <div>
             <label className="text-xs tracking-wider text-[#9a97a3]">音视频分析后端</label>
@@ -224,7 +220,7 @@ export function GeminiProxySettingsCard({
                       className="accent-[#d4af37]"
                     />
                     <span>{model.name}</span>
-                    <span className="font-mono text-[11px] text-[#666371]">{model.id}</span>
+                    <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[9px] text-[#9a97a3]">在线 · 图片</span>
                   </label>
                 ))}
               </div>
@@ -242,7 +238,15 @@ export function GeminiProxySettingsCard({
           </div>
           <p className="text-[11px] leading-5 text-[#5f5c68]">连接测试只请求模型目录，不生成图片。API Key 使用操作系统安全存储加密。</p>
         </div>
+  )
+  if (bare) return body
+  return (
+    <section className="flex h-full min-w-0 flex-col rounded-2xl border border-white/[0.08] bg-[#111118] p-6 shadow-[0_16px_50px_rgba(0,0,0,0.18)]">
+      <div className="mb-5 border-b border-white/[0.07] pb-4">
+        <h2 className="text-sm font-semibold tracking-[0.14em] text-[#e8e6df]">Gemini 反代</h2>
+        <p className="mt-2 text-xs leading-5 text-[#777482]">填写独立 Base URL 与 API Key，从网关获取模型后选择分析模型并勾选生图。获取模型只刷新本卡片列表，不会写入设置文件。</p>
       </div>
+      <div className="flex-1">{body}</div>
     </section>
   );
 }

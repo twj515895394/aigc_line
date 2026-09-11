@@ -31,7 +31,8 @@ export function registerComfyUIHandlers(): void {
     const tasks = await listProjectGenerationTasks(projectId)
     return tasks.map(({ id, projectId, nodeId, provider, operation, status, taskId, relativePath, error, acknowledged, updatedAt, request }) =>
       ({ id, projectId, nodeId, provider, operation, status, taskId, relativePath, error, acknowledged, updatedAt,
-        sourceVideoPath: 'sourceVideoPath' in request ? request.sourceVideoPath : undefined }))
+        sourceVideoPath: 'sourceVideoPath' in request ? request.sourceVideoPath : undefined,
+        workflowId: 'workflowId' in request ? request.workflowId : undefined }))
   })
   ipcMain.handle(IPC_CHANNELS.comfyui.acknowledgeGenerationTask, (_event, projectId: string, nodeId: string, taskId: string) =>
     acknowledgeGenerationTaskResult(projectId, nodeId, taskId))
@@ -61,9 +62,11 @@ export function registerComfyUIHandlers(): void {
     IPC_CHANNELS.comfyui.generateVideo,
     async (_event, request: GenerateVideoRequest): Promise<GenerateVideoResult> => {
       try {
-        if (isSeedanceVideoWorkflow(request.workflowId)) return await generateVideoWithSeedance(request)
-        if (isGptGrokVideoWorkflow(request.workflowId)) return await generateVideoWithGptGrok(request)
-        return await generateVideoWithComfyUI(request)
+        const workflowId = request.workflowId || (await getRuntimeSettings()).defaultVideoWorkflowId
+        const resolvedRequest = { ...request, workflowId }
+        if (isSeedanceVideoWorkflow(workflowId)) return await generateVideoWithSeedance(resolvedRequest)
+        if (isGptGrokVideoWorkflow(workflowId)) return await generateVideoWithGptGrok(resolvedRequest)
+        return await generateVideoWithComfyUI(resolvedRequest)
       } catch (error) {
         return {
           success: false,

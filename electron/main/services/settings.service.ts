@@ -9,10 +9,12 @@ import type {
   TestQwenConnectionRequest,
   TestSeedreamConnectionRequest,
   VideoAnalysisProvider,
+  WorkflowFallbackSlot,
 } from '../../../src/shared/ipc.types'
 import { getAppDataDir } from './project.store'
 import { fetchGoogleApi, normalizeGoogleProxyUrl } from './google-network.service'
 import { normalizeOpenAiCompatibleBaseUrl } from '../../../src/shared/reverse-proxy-url'
+import { normalizeWorkflowFallbackSlots } from '../../../src/shared/generation-fallback'
 
 interface StoredSettings {
   comfyuiBaseUrl?: string
@@ -27,6 +29,9 @@ interface StoredSettings {
   /** Legacy field retained only for migration from earlier development builds. */
   encryptedSeedreamApiKey?: string
   defaultImageWorkflowId?: string
+  defaultVideoWorkflowId?: string
+  fallbackImageWorkflows?: WorkflowFallbackSlot[]
+  fallbackVideoWorkflows?: WorkflowFallbackSlot[]
   videoAnalysisProvider?: VideoAnalysisProvider
   geminiBaseUrl?: string
   encryptedGeminiApiKey?: string
@@ -49,6 +54,9 @@ export interface RuntimeSettings {
   seedreamBaseUrl: string
   seedreamApiKey: string
   defaultImageWorkflowId: string
+  defaultVideoWorkflowId: string
+  fallbackImageWorkflows: WorkflowFallbackSlot[]
+  fallbackVideoWorkflows: WorkflowFallbackSlot[]
   videoAnalysisProvider: VideoAnalysisProvider
   geminiBaseUrl: string
   geminiApiKey: string
@@ -63,6 +71,7 @@ export interface RuntimeSettings {
 const SETTINGS_FILE = 'settings.json'
 const DEFAULT_COMFY_URL = 'http://127.0.0.1:8188'
 const DEFAULT_WORKFLOW = 'krea2-turbo-t2i'
+const DEFAULT_VIDEO_WORKFLOW = 'minimax-h3-easy'
 const REMOVED_IMAGE_WORKFLOWS = new Set(['flux2-klein-9b-t2i', 'flux2-klein-9b-edit'])
 const DEFAULT_QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 export const DEFAULT_SEEDREAM_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3'
@@ -80,6 +89,13 @@ export const normalizeSeedreamBaseUrl = (value: string): string => (
 
 const normalizeDefaultWorkflow = (value?: string): string => (
   !value || REMOVED_IMAGE_WORKFLOWS.has(value) ? DEFAULT_WORKFLOW : value
+)
+
+const normalizeDefaultVideoWorkflow = (value?: string): string => (
+  value?.trim() || DEFAULT_VIDEO_WORKFLOW
+)
+const normalizeFallbackWorkflows = (defaultId: string, value?: WorkflowFallbackSlot[]): WorkflowFallbackSlot[] => (
+  normalizeWorkflowFallbackSlots(defaultId, value)
 )
 function normalizeOptionalProxyBaseUrl(value?: string): string {
   const trimmed = value?.trim() || ''
@@ -152,6 +168,9 @@ export async function getRuntimeSettings(): Promise<RuntimeSettings> {
       || process.env.ARK_API_KEY
       || '',
     defaultImageWorkflowId: normalizeDefaultWorkflow(stored.defaultImageWorkflowId),
+    defaultVideoWorkflowId: normalizeDefaultVideoWorkflow(stored.defaultVideoWorkflowId),
+    fallbackImageWorkflows: normalizeFallbackWorkflows(normalizeDefaultWorkflow(stored.defaultImageWorkflowId), stored.fallbackImageWorkflows),
+    fallbackVideoWorkflows: normalizeFallbackWorkflows(normalizeDefaultVideoWorkflow(stored.defaultVideoWorkflowId), stored.fallbackVideoWorkflows),
     videoAnalysisProvider: normalizeVideoAnalysisProvider(stored.videoAnalysisProvider),
     geminiBaseUrl: stored.geminiBaseUrl?.trim() || '',
     geminiApiKey: decryptToken(stored.encryptedGeminiApiKey),
@@ -180,6 +199,9 @@ export async function getAppSettingsView(): Promise<AppSettingsView> {
     seedreamApiKey: runtime.seedreamApiKey,
     seedreamApiKeyConfigured: !!runtime.seedreamApiKey,
     defaultImageWorkflowId: runtime.defaultImageWorkflowId,
+    defaultVideoWorkflowId: runtime.defaultVideoWorkflowId,
+    fallbackImageWorkflows: runtime.fallbackImageWorkflows,
+    fallbackVideoWorkflows: runtime.fallbackVideoWorkflows,
     videoAnalysisProvider: runtime.videoAnalysisProvider,
     geminiBaseUrl: runtime.geminiBaseUrl,
     geminiApiKey: runtime.geminiApiKey,
@@ -204,6 +226,20 @@ export async function saveAppSettings(request: SaveAppSettingsRequest): Promise<
     googleAiProxyUrl: normalizeGoogleProxyUrl(request.googleAiProxyUrl || ''),
     seedreamBaseUrl: normalizeSeedreamBaseUrl(request.seedreamBaseUrl || DEFAULT_SEEDREAM_BASE_URL),
     defaultImageWorkflowId: normalizeDefaultWorkflow(request.defaultImageWorkflowId),
+    defaultVideoWorkflowId: request.defaultVideoWorkflowId === undefined
+      ? current.defaultVideoWorkflowId
+      : normalizeDefaultVideoWorkflow(request.defaultVideoWorkflowId),
+    fallbackImageWorkflows: request.fallbackImageWorkflows === undefined
+      ? current.fallbackImageWorkflows
+      : normalizeFallbackWorkflows(normalizeDefaultWorkflow(request.defaultImageWorkflowId), request.fallbackImageWorkflows),
+    fallbackVideoWorkflows: request.fallbackVideoWorkflows === undefined
+      ? current.fallbackVideoWorkflows
+      : normalizeFallbackWorkflows(
+        request.defaultVideoWorkflowId === undefined
+          ? normalizeDefaultVideoWorkflow(current.defaultVideoWorkflowId)
+          : normalizeDefaultVideoWorkflow(request.defaultVideoWorkflowId),
+        request.fallbackVideoWorkflows,
+      ),
     videoAnalysisProvider: request.videoAnalysisProvider === undefined
       ? current.videoAnalysisProvider
       : normalizeVideoAnalysisProvider(request.videoAnalysisProvider),

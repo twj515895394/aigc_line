@@ -1,5 +1,9 @@
+import { useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { chatLinkLabel, resolveChatFileLink } from '../shared/chat-file-href'
+import { RevealInFolderLink } from './RevealInFolder'
+import { useAppStore } from '../stores/app.store'
 
 interface MarkdownProps {
   children: string
@@ -7,6 +11,13 @@ interface MarkdownProps {
 }
 
 export function Markdown({ children, className = '' }: MarkdownProps) {
+  const folderPath = useAppStore((state) => state.currentProject?.folderPath)
+  const artifacts = useAppStore((state) => state.artifacts)
+  const messages = useAppStore((state) => state.messages)
+  const knownRelativePaths = useMemo(() => [
+    ...artifacts.flatMap((artifact) => artifact.path ? [artifact.path] : []),
+    ...messages.flatMap((message) => message.artifact?.path ? [message.artifact.path] : []),
+  ], [artifacts, messages])
   return (
     <div className={className}>
       <ReactMarkdown
@@ -19,11 +30,30 @@ export function Markdown({ children, className = '' }: MarkdownProps) {
           ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
           ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
           li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-[#e8c766] underline hover:text-[#f0d98c]">
-              {children}
-            </a>
-          ),
+          a: ({ children, href }) => {
+            const filePath = resolveChatFileLink(folderPath, href, chatLinkLabel(children), knownRelativePaths)
+            if (filePath) {
+              return (
+                <RevealInFolderLink href={href || filePath} filePath={filePath} className="text-[#e8c766] underline hover:text-[#f0d98c]">
+                  {children}
+                </RevealInFolderLink>
+              )
+            }
+            return (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#e8c766] underline hover:text-[#f0d98c]"
+                onClick={(event) => {
+                  event.preventDefault()
+                  console.info('[reveal-in-folder] markdown href not a project file', href, 'label', chatLinkLabel(children), 'folder', folderPath)
+                }}
+              >
+                {children}
+              </a>
+            )
+          },
           strong: ({ children }) => <strong className="font-semibold text-[#f5f3ea]">{children}</strong>,
           blockquote: ({ children }) => (
             <blockquote className="mb-2 border-l-2 border-[#d4af37]/40 pl-3 text-[#a09dae] last:mb-0">

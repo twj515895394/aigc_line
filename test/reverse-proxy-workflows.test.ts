@@ -3,10 +3,13 @@ import {
   gptGrokImageWorkflowId,
   gptGrokVideoWorkflowId,
   geminiProxyImageWorkflowId,
+  imageWorkflowReferenceLimit,
+  isCloudImageWorkflow,
   isGeminiProxyImageWorkflow,
   isGptGrokImageWorkflow,
   isGptGrokVideoWorkflow,
   listEnabledReverseProxyWorkflows,
+  workflowTypeLabel,
 } from '../src/shared/reverse-proxy-workflows'
 
 describe('reverse-proxy workflow ids', () => {
@@ -36,5 +39,14 @@ describe('reverse-proxy workflow ids', () => {
       gptGrokEnabledImageModelIds: [],
       gptGrokEnabledVideoModelIds: [],
     })).toEqual([])
+  })
+
+  it('labels reverse-proxy image models as online, not ComfyUI', () => {
+    expect(workflowTypeLabel({ id: gptGrokImageWorkflowId('gpt-image'), kind: 'text-to-image' })).toBe('GPT / Grok · 在线 · 多图')
+    expect(workflowTypeLabel({ id: geminiProxyImageWorkflowId('gemini-3.1-flash-image'), kind: 'text-to-image' })).toBe('Gemini 反代 · 在线 · 多图')
+    expect(workflowTypeLabel({ id: 'krea2-turbo-t2i', kind: 'text-to-image' })).toBe('ComfyUI · 文生图')
+    expect(isCloudImageWorkflow(gptGrokImageWorkflowId('gpt-image'))).toBe(true)
+    expect(imageWorkflowReferenceLimit(gptGrokImageWorkflowId('gpt-image'))).toBe(10)
+    expect(imageWorkflowReferenceLimit('krea2-turbo-t2i')).toBe(0)
   })
 })

@@ -74,6 +74,9 @@ describe('director reference image scene draft', () => {
   it('exposes Agent scene application without a separate vision-model action', () => {
     const actions = getNodeCapabilities('director')?.actions.map((action) => action.id)
     expect(actions).toContain('apply-scene-draft')
+    expect(actions).toContain('review-scene')
+    expect(actions).toContain('capture-still')
+    expect(actions).toContain('export-video')
     expect(actions).not.toContain('build-scene-from-image')
   })
 })

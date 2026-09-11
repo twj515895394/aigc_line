@@ -113,14 +113,26 @@ describe('GPT/Grok reverse-proxy settings persistence', () => {
   })
 
   it('defaults enabled GPT/Grok model lists to empty arrays', async () => {
+    // saveAppSettings 采用合并语义：请求省略字段时保留 settings.json 旧值。
+    // 因此先显式保存 [] 清空列表，再验证省略字段时保留空数组（而不是被上一条用例的 ['gpt-image-custom'] 污染）。
     const saved = await saveAppSettings({
       ...baseRequest,
       gptGrokBaseUrl: 'http://127.0.0.1:8317/v1',
       gptGrokApiKey: 'empty-lists-key',
+      gptGrokEnabledImageModelIds: [],
+      gptGrokEnabledVideoModelIds: [],
     })
     expect(saved.gptGrokEnabledImageModelIds).toEqual([])
     expect(saved.gptGrokEnabledVideoModelIds).toEqual([])
     expect(saved.gptGrokEnabledImageModelIds).not.toEqual(expect.arrayContaining(['gpt-image-2']))
+
+    const preserved = await saveAppSettings({
+      ...baseRequest,
+      gptGrokBaseUrl: 'http://127.0.0.1:8317/v1',
+      gptGrokApiKey: 'empty-lists-key',
+    })
+    expect(preserved.gptGrokEnabledImageModelIds).toEqual([])
+    expect(preserved.gptGrokEnabledVideoModelIds).toEqual([])
   })
 
   it('clears the encrypted GPT/Grok key without touching Gemini', async () => {

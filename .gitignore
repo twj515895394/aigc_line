@@ -37,3 +37,8 @@ test/screenshots
 # TypeScript build-mode cache/output must never be written beside source files
 *.tsbuildinfo
 .tsbuild/
+
+# Session working artifacts (not part of the repo)
+/scripts/
+/.handoff/
+/.scratch/

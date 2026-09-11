@@ -43,6 +43,7 @@ import type {
   SaveImageEditResult,
   SaveBoardPreviewRequest,
   SaveBoardPreviewResult,
+  ShowItemInFolderResult,
 } from '../../src/shared/ipc.types';
 import type { SaveDirectorStillRequest, SaveDirectorStillResult, SaveDirectorVideoRequest, SaveDirectorVideoResult } from '../../src/shared/director.types';
 
@@ -106,7 +107,7 @@ export interface ElectronAPI {
   onCanvasCommand: (callback: (command: CanvasCommandRequest) => void) => () => void;
   sendCanvasCommandResult: (response: CanvasCommandResponse) => void;
   showOpenDialog: (options?: Electron.OpenDialogOptions) => Promise<string[]>;
-  showItemInFolder: (path: string) => void;
+  showItemInFolder: (path: string) => Promise<ShowItemInFolderResult>;
   getPathForFile: (file: File) => string;
 }
 
@@ -176,7 +177,7 @@ const api: ElectronAPI = {
   onCanvasCommand: (callback) => onPush(IPC_CHANNELS.push.canvasCommand, callback),
   sendCanvasCommandResult: (response) => ipcRenderer.send(IPC_CHANNELS.canvas.commandResult, response),
   showOpenDialog: (options) => invoke('dialog:showOpenDialog', options),
-  showItemInFolder: (path) => ipcRenderer.send('shell:showItemInFolder', path),
+  showItemInFolder: (path) => invoke(IPC_CHANNELS.project.showItemInFolder, path),
   // File.path was removed in Electron 32 - this is the supported way
   getPathForFile: (file) => webUtils.getPathForFile(file),
 };
