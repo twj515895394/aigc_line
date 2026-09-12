@@ -137,7 +137,7 @@ registerNodeCapabilities({
     {
       key: 'quality',
       type: 'enum',
-      values: ['FAST', 'MEDIUM', 'HIGH', 'ULTRA'],
+      values: ['LOW', 'MEDIUM', 'HIGH', 'ULTRA'],
       description: '放大质量（RTX Video Super Resolution）',
     },
     { key: 'sourcePath', type: 'string', description: '放大结果的 workspace 相对路径' },

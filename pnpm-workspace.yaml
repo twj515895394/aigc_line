@@ -2,3 +2,9 @@ allowBuilds:
   electron: true
   electron-winstaller: true
   esbuild: true
+
+# app-builder-lib@26.15.3 的代码调用 ElectronDownloadCacheMode（仅 @electron/get
+# 5.x 导出），但其 package.json 仍声明 ^3.0.0，导致打包时下载 Electron / NSIS 工具集
+# 直接抛 TypeError。electron 自身已依赖 5.1.0，故统一提升。
+overrides:
+  "@electron/get": "^5.1.0"

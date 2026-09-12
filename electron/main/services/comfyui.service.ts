@@ -713,7 +713,7 @@ export async function generateImageWithComfyUI(
 }
 
 const UPSCALE_SCALES = [2, 3, 4] as const
-const UPSCALE_QUALITIES = ['FAST', 'MEDIUM', 'HIGH', 'ULTRA'] as const
+const UPSCALE_QUALITIES = ['LOW', 'MEDIUM', 'HIGH', 'ULTRA'] as const
 
 export async function upscaleVideoWithComfyUI(
   request: UpscaleVideoRequest,

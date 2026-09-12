@@ -30,7 +30,7 @@ Organize shots, reference images, generated videos, and upscaled outputs on one 
 - **Multi-model image generation** with ComfyUI, Google Nano Banana 2 / Pro, and Volcengine Ark Doubao-Seedream-5.0-pro / lite. Cloud models support 2K text-to-image and single-reference image-to-image at 16:9 / 1:1 / 4:3.
 - **MiniMax H3 text / first-last-frame video**. Connected images become candidates and can be dragged into explicit first-frame and last-frame slots; either slot is optional.
 - **MiniMax H3 multimodal reference video**. Drag connected media into ordered image, video, and audio tracks. Track order maps directly to `<Picture n>`, `<Video n>`, and `<Audio n>` references, with limits of 9 images, 3 videos, and 3 standalone audio clips.
-- **RTX video upscaling** with 2× / 3× / 4× scaling, FAST / MEDIUM / HIGH / ULTRA quality presets, and automatic source-frame-rate matching.
+- **RTX video upscaling** with 2× / 3× / 4× scaling, LOW / MEDIUM / HIGH / ULTRA quality presets, and automatic source-frame-rate matching.
 - **In-canvas media preview**, including Range-based streaming for generated videos.
 - **Application settings** for ComfyUI, Agent, Google AI, Volcengine Ark Seedream, Qwen3.5-Omni Plus, and the default image model. Google/Qwen secrets use Electron safe storage; the Seedream key is stored as local plaintext by design.
 - **Project persistence** for chat history, canvas layout, node parameters, and generated assets.

@@ -3,6 +3,7 @@
   "appId": "com.aigc.canvas",
   "productName": "AIGC CANVAS",
   "asar": true,
+  "electronDist": "node_modules/electron/dist",
   "directories": {
     "output": "release/${version}"
   },

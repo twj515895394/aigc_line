@@ -981,9 +981,9 @@ function PromptPanel({ id, kind }: { id: string; kind: 'image' | 'video' }) {
 }
 
 const UPSCALE_SCALES = [2, 3, 4] as const
-const UPSCALE_QUALITIES = ['FAST', 'MEDIUM', 'HIGH', 'ULTRA'] as const
+const UPSCALE_QUALITIES = ['LOW', 'MEDIUM', 'HIGH', 'ULTRA'] as const
 const UPSCALE_QUALITY_LABELS: Record<(typeof UPSCALE_QUALITIES)[number], string> = {
-  FAST: '快速',
+  LOW: '快速',
   MEDIUM: '均衡',
   HIGH: '高质量',
   ULTRA: '极致',
