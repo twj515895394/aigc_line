@@ -25,6 +25,7 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 | `src/components/CreateProjectDialog.tsx` | 新建项目弹窗：名称、Agent、模型与目录选择 |
 | `electron/main/services/agent/prompts.ts` | Agent 系统提示词（分镜创作规范） |
 | `electron/main/services/agent/builtin-plugin.ts` | 解析开发/打包环境中的内置 Claude Plugin 路径并生成 SDK 配置 |
+| `electron/main/services/agent/claude-runtime.ts` | 从 Claude SDK 解析同版本的平台原生程序，将 ASAR 虚拟路径映射到真实解包路径；模型发现与聊天会话共用 |
 | `electron/main/services/agent/skills.ts` | 枚举当前可用 Skill：活动 SDK 会话 + 应用内置、项目级、用户级目录兜底 |
 | `electron/main/services/comfyui.service.ts` | ComfyUI 全部交互：工作流模板注册、参数注入、上传媒体、排队、轮询、下载结果 |
 | `electron/main/services/google-image.service.ts` | Google Gemini 图片生成：Nano Banana 2 / Pro 的 2K 文生图与最多 14 张有序参考图生成，产物写入项目目录 |
@@ -59,6 +60,8 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 | `src/features/director/director-history.ts` / `director-video-export.ts` / `director-webm-duration.ts` / `director-rig-resources.ts` | 导演台编辑历史、WebCodecs 逐帧 WebM 编码与包含末帧的 EBML 时长修正、实例独占骨骼资源清理 |
 | `src/features/image-editor/image-editor-model.ts` | 画板稳定 ID 素材合并、分项加载与导出前像素预算 |
 | `src/components/canvas-capabilities.ts` | 内置节点 kind 的能力声明（在这里注册新节点类型） |
+| `src/components/ChatArtifactCard.tsx` / `src/shared/canvas-artifacts.ts` | 聊天轻量产物卡片、按需放大阅读、图片画布同步及旧文档迁移；弹窗复用 ArtifactRenderer 渲染 Markdown/HTML |
+| `electron/main/services/agent/artifact-file.ts` | PushArtifact 文件类型、项目真实路径、UTF-8 与大小校验；图片使用版本化 workspace URL，不内联 base64 |
 | `src/features/director/` | 3D 导演台：白模/道具编辑、人物路径、多机位与跟拍约束、构图截图与工程校验 |
 | `src/features/image-editor/` | 自由画板：无需输入即可打开全屏 Excalidraw，也可按连线载入图片；自动保存可序列化场景，多选内容右键导出 PNG 并回写画布输出节点 |
 | `src/components/` | 其他 UI：聊天面板、artifact 渲染、更新弹窗等 |
@@ -74,6 +77,8 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 
 ## 现有功能
 
+- **聊天文档产物**：`PushArtifact` 支持图片、Markdown、HTML 和常用 UTF-8 文本/代码（正文上限 1 MB，图片 20 MB）。文档只显示在聊天中的轻量卡片，点击后通过 `ChatArtifactCard` 懒加载 `ArtifactRenderer` 到放大阅读弹窗，关闭后卸载正文与 iframe；支持添加到对话。相同源路径重新推送后，聊天卡片打开最新内容，历史与正文持久化在聊天事件日志中。图片仍创建/更新 image 节点，保留位置和连线、版本化 workspace URL 与删除记录。旧 `document` 类型只供兼容：读取项目画布/聊天时，先保存 `.aigc-line/canvas-snapshot.json.before-chat-documents.bak`，串行补齐聊天中缺失的文档，再移除旧文档节点及其连线；已有较新聊天产物优先，迁移幂等，失败保留原画布且禁止覆盖。新文档不写入画布快照，也不注册 Agent 节点能力。源文件 realpath、UTF-8、大小和 `.aigc-line` 禁读校验保持不变。HTML 资源相对源 HTML 所在目录解析，iframe 仅允许脚本，不允许同源访问；阅读 dialog 带 `data-canvas-node-editor-dialog`，Delete/Backspace 不得删除底层画布节点。PushArtifact 的 width/height 仅保留旧参数兼容，弹窗尺寸自适应窗口。
+
 - **启动加载页**：`electron/preload/startup-screen.ts` 在 React 加载前显示与主界面一致的深色黑金品牌屏，使用本地 `app-icon.png`、品牌文案和不表示百分比的加载指示，保留顶部窗口拖动区，支持窄屏和减少动态效果偏好。React 首次提交并绘制后由 `App.tsx` 发出就绪消息，启动屏淡出并清理监听/计时器；不再在 `root.render()` 后立即隐藏，也不再满 5 秒强制露出空白页。超过 15 秒未收到就绪消息时显示较慢提示和“重新加载”，不会伪造加载完成。
 
 - **应用图标**：黑金画框与播放标志统一用于安装包、应用窗口、标题栏、首页和聊天空状态。`resources/app-icons/icon.ico` 包含 16–256px 多尺寸，`icon.icns` 包含 16–1024px 多尺寸，`icon.png` 为 1024px；界面使用 `public/app-icon.png`（256px），Windows 窗口使用 `public/app-icon.ico`。源图更新后用 Windows PowerShell 运行 `resources/app-icons/export-icons.ps1` 同步导出，保留透明通道；原 `public/logo.svg` / `favicon.ico` 与 `build/icon.*` 只作为旧资源保留，不再用于主应用图标。
@@ -87,7 +92,7 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
   - `voiceover-to-video`：按旁白音频与 SRT 时间轴生成画面；图片提示词统一使用中文，视频提示词按一个节点内多个带时间段的子分镜描述统一风格、运镜、转场与音效；禁止生成 BGM，但允许不遮盖旁白的环境音和拟音。图片与视频生成前分别取得用户明确确认；生成视频后只核对节点状态和产物路径，逐段变速对齐后交给 `jianying-draft` 创建剪映草稿。
   - `script-to-drama-video`：统一承接短剧创作、分镜规划、现有 image → video 链修改和连续性修复。主 Agent 串行调度三个真实子 Agent：资产 Agent 读取原剧本、生成/复用人物场景道具并输出 `资产报告.md`；分镜师 Agent 读取原剧本和资产报告，拆分 5/10/15 秒片段及内部 Shot、创建视频节点/引用/连线、逐片调用 H3 Skill 并输出 `分镜交接.md`；独立检查 Agent 只读实际画布，核对人物引用、分段连续性、必要补镜/描述和 prompt，输出每轮检查报告。未通过则优化后复查，直到全部待生成片段通过且获得用户生成授权才生成；阻塞不得跳过，通过后内容变更须复查。报告保存在项目 `generated/drama-reports/<本次任务标识>/`，交接规范在 `references/agent-handoffs.md`，导演方法在 `references/directing-and-continuity.md`。人物/场景/H3 专项 Skill 由对应角色调用，原参考图分阶段确认保留；生成后只核对节点状态和产物路径，不自动执行成片视频审核。
   - `character-reference-generation`：每个角色先生成唯一身份底图，再以底图为单一参考通过图生图派生不同场景/服装/妆造/状态版本；所有图片均为从左到右“头部近景、自然站立全身正面、侧面、背面”的横向四联图，三个全身角度禁止 A-pose/T-pose。3D、半写实、国漫/游戏/影视 CG 人物必须读取 `references/3d-character-prompt-template.md`，按角色档案替换模板中的年龄、性别、身高、体型、骨相和服装示例。
-  - `environment-reference-generation`：为每个去重后的 `sceneId` 生成无人高机位斜俯视空间全景图，固定布局、出入口、行动路线、材质和主光方向；不生成普通平视图、垂直鸟瞰平面图、二维户型图或多视图拼贴，生成前必须取得用户明确确认。
+  - `environment-reference-generation`：为每个去重后的 `sceneId` 生成一张无人 2×2 四宫格环境图，固定左上 Front View（正面）、右上 Left View（左侧）、左下 Right View（右侧）、右下 Back View（背面）；以正面主墙面为方位基准，四格使用平视相机和真实透视，保持同一布局、出入口、行动路线、材质与场景主光方向，不得镜像或重新布置。整图作为一个 image 节点和一个视频参考名额；不生成俯视图或二维户型图，生成前必须取得用户明确确认。
   - `h3-prompt-writing`：MiniMax H3 官方提示词写作 Skill，负责 T2VA / I2VA / FL2VA / L2VA / Ref2VA 的最终提示词格式、引用标签、时间戳、对白和声音字段；`script-to-drama-video` 提供完整逐片段导演包、片段内 Shot 时间线及真实引用数组顺序，并在 Ref2VA 视频生成或重做时调用它，不自行复制或猜测官方格式。
   - `jianying-draft`：使用 pyJianYingDraft 生成剪映专业版草稿。
 - **画布**：React Flow，缩放/框选/连线/删除；快照防抖自动保存，工具栏新增节点按实际画布视区寻找空位并选中新节点；支持 `image-editor` 自由画板节点。旧版分镜表以及已废弃的 shot/text 节点自动迁移/清理为 image → video 链，旧文本内容会在目标 prompt 为空时转入直接相连的图片或视频。
@@ -107,6 +112,7 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 - **前端隔离与异步状态**：HTML Artifact iframe 不得同时启用脚本与同源权限，当前使用无同源权限的 sandbox；画布快照加载和图片/视频/放大结果回写必须复核发起时的项目，防止切换项目后串写。Agent 运行状态按 `projectId` 保存，切回后台运行项目时仍能显示状态和停止按钮。ComfyUI 工作流列表在渲染进程共享缓存，避免每个节点重复 IPC 查询。
 - **画布写入语义**：Canvas MCP 写工具按节点 ID/字段直接应用，采用最后写入者生效（Last Write Wins），不接收或校验全局画布版本号；仍校验节点存在性、ID 唯一性、字段能力和连线合法性。
 - **节点类型**（`CanvasNodeKind`）：
+  - `document` 仅保留旧快照兼容类型，加载时备份并迁移到聊天，不再创建或渲染画布文档节点
   - `image` 图片：ComfyUI 的 Krea 2 Turbo、Z-Image Turbo 当前仅文生图；Nano Banana 2 / Pro 支持最多 14 张有序参考图，Doubao-Seedream-5.0-pro / lite 支持最多 10 张有序参考图；画幅支持 16:9 / 9:16 / 1:1 / 4:3，全部模型使用 2K 输出，ComfyUI 图片工作流直接保存 VAE 解码结果且不经过 RTX 放大
   - `image-editor` 画板：可直接打开空白 Excalidraw，也可把所有连入的有效图片作为普通元素载入；`boardState` 自动保存矢量场景和连接图片变换但不保存图片 data URL；多选右键导出后创建相连的只读 image 输出节点
   - `video` 视频：MiniMax H3 文生视频 / 首尾帧 / 全模态参考（图片 9 + 视频 3 + 音频 3，提示词用 `<Picture n>` 等引用），全模态参考可选择标准 20 步或带 Turbo 8 步 LoRA 的加速工作流；H3 参考视频通过 `GetVideoComponents` 同时把画面接入 `ref_videos`、内嵌音轨接入相同下标的 `ref_video_audios`，画布仍可显式提取音轨生成独立 audio 节点并放入单独音频参考轨；也支持火山方舟 Agent Plan Doubao Seedance 2.0 文生视频与全模态参考，提示词用“图片 n / 视频 n / 音频 n”引用素材，默认 720p 并生成同步音频
@@ -147,6 +153,8 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 
 ## 开发注意事项
 
+- **Claude 打包运行时**：`electron-builder.json` 必须显式解包 `node_modules/@anthropic-ai/claude-agent-sdk-*/**`。模型列表与聊天的 `query()` 都通过 `claude-runtime.ts` 指定 `pathToClaudeCodeExecutable`，将 `.asar/` 或 `.asar\\` 转为 `.asar.unpacked/` 或 `.asar.unpacked\\`。不能只依赖 SDK 自动解析：Electron 的文件存在检查能访问虚拟 ASAR 路径，但系统进程无法从该路径启动原生程序，SDK 会给出误导性的 Linux libc 通用报错。开发环境保留原始路径，真实程序缺失时明确提示；模型列表初始化失败也返回可读错误，不得在 `try` 外抛出。
+
 1. **新增节点类型 checklist**（漏一处就会出现"Agent 说改了但界面没变"之类的问题）：
    - `src/shared/ipc.types.ts`：`CanvasNodeKind` 加 kind，`CanvasNodeData` 加字段
    - `electron/main/services/agent/tools.ts`：`nodeFields` zod schema 加同样字段 —— **zod 默认静默丢弃未声明字段**，这是已踩过的坑
@@ -167,7 +175,7 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 11. **Skill 斜杠菜单**（Claude / Codex 按项目分别扫描目录）：`chat:listSkills` 扫描内置、项目和用户 Skill；活动 Query 的 `supportedCommands()` 只补充已发现 Skill 的元数据，不得把 `/clear`、`/batch` 等控制命令加入菜单。显式 `/<skill>` 必须保持在 Agent prompt 第一行；节点引用和附件上下文追加在命令之后。
 12. **新建上下文**：Codex 在空闲时清除其恢复 ID，下一轮用 SDK 新建 Thread，保留历史和画布；Claude 通过 `chat:clearContext` 向 SDK 发送隐藏的 `/clear`，仅在 Agent 空闲时允许执行；吞掉该命令的 `(no content)`，完成后追加并持久化 `event: 'context-cleared'` 分界消息。不要自动删除聊天历史、画布或项目文件。
 13. **旁白视频生成门**：`voiceover-to-video` 必须在实际生成图片、视频前分别询问并等待用户明确同意，重做也要重新确认；系统实际提交的图片提示词必须使用中文；每个视频提示词必须包含覆盖完整时长的一个或多个连续子分镜，默认优先可执行的单一连续 Shot，只有新增信息、关键反应或空间关系变化时才切镜；禁止 BGM，但可生成不遮盖原旁白的同步环境音和拟音。视频生成后只核对节点状态和 `sourcePath`，不自动执行质量审核。
-14. **剧本深化、导演方法、资产委派与片段层级**：`script-to-drama-video` 是唯一通用短剧分镜 Skill；`storyboard-production` 已删除。默认保留核心人物关系、事实、冲突、因果和结局方向，允许为视听表达补足动作、反应、潜台词、必要对白/旁白和声画衔接；改变核心动机、关键事件或结局必须先确认。先按 `references/directing-and-continuity.md` 建立节拍、blocking、切镜理由和连续性账本，再拆成可独立生成的 5/10/15 秒片段；每个片段直接创建一个 video 节点，片段内 Shot 使用连续时间范围写入导演包和 prompt，不创建 Canvas 节点。人物图必须调用 `character-reference-generation`：每个 `characterId` 先生成唯一身份底图，审核合格并取得 `sourcePath` 后，再由该底图直接连接所有场景/服装变体并通过单参考图图生图生成；禁止变体链式派生和不同场景独立文生图，底图重做后全部变体都要重做。场景图必须调用 `environment-reference-generation` 生成无人斜俯视空间全景，禁止在生产 Skill 内维护 prompt template。视频固定使用 `minimax-h3-r2v`，最终 Ref2VA prompt 必须调用 `h3-prompt-writing`。
+14. **剧本深化、导演方法、资产委派与片段层级**：`script-to-drama-video` 是唯一通用短剧分镜 Skill；`storyboard-production` 已删除。默认保留核心人物关系、事实、冲突、因果和结局方向，允许为视听表达补足动作、反应、潜台词、必要对白/旁白和声画衔接；改变核心动机、关键事件或结局必须先确认。先按 `references/directing-and-continuity.md` 建立节拍、blocking、切镜理由和连续性账本，再拆成可独立生成的 5/10/15 秒片段；每个片段直接创建一个 video 节点，片段内 Shot 使用连续时间范围写入导演包和 prompt，不创建 Canvas 节点。人物图必须调用 `character-reference-generation`：每个 `characterId` 先生成唯一身份底图，审核合格并取得 `sourcePath` 后，再由该底图直接连接所有场景/服装变体并通过单参考图图生图生成；禁止变体链式派生和不同场景独立文生图，底图重做后全部变体都要重做。场景图必须调用 `environment-reference-generation` 生成同一场景的无人正面/左侧/右侧/背面四宫格环境图，禁止在生产 Skill 内维护 prompt template。视频固定使用 `minimax-h3-r2v`，最终 Ref2VA prompt 必须调用 `h3-prompt-writing`。
 16. **设置版本与持久化校验**：Vite 可能只热更新渲染进程而 Electron 主进程仍为旧版本。设置页必须验证 `get/saveAppSettings` 返回值包含 Qwen、Google AI 与 Seedream 字段；缺失时提示完全重启，不能误报保存成功。主进程写入设置后必须重新读取并验证 URL 与 Key。Seedream 普通 API Base URL 为 `https://ark.cn-beijing.volces.com/api/v3`，Agent Plan Base URL 为 `https://ark.cn-beijing.volces.com/api/plan/v3`；设置、测试和运行时均须规范化完整生图地址，避免重复追加 `/images/generations`。Qwen / Google AI API Key 使用 safeStorage 加密并回填；Seedream API Key 按用户要求使用 `seedreamApiKey` 字段明文保存、回填和清除，保存新值时删除旧 `encryptedSeedreamApiKey`。Agent Token 仍不回显。
 17. **Google 图片生成**：Nano Banana 2 固定使用 `gemini-3.1-flash-image`，Nano Banana Pro 固定使用 `gemini-3-pro-image`，两者共用 Google AI Studio API Key。REST 请求必须使用 `generationConfig.imageConfig` 发送画幅简写与 `imageSize: "2K"`；不要使用 `responseFormat.image`，该 v1 端点会把画幅和尺寸按 `ImageResponseFormat` 枚举解析并对简写、符号枚举均返回 HTTP 400。最多 14 张参考图按 `referenceImageNodeIds` 顺序发送，只允许读取当前项目目录内的相对路径，单张不超过 20 MB。Google Key 按 Qwen Key 的持久化方式保存、回填与校验。请求必须经 `google-network.service.ts` 使用 Electron 网络栈；无法直连时可配置独立的 HTTP/HTTPS/SOCKS 代理，网络错误需保留底层原因而不是只显示 `fetch failed`。
    - **Seedream 图片生成**：只注册 Doubao-Seedream-5.0-pro（API 模型 ID `doubao-seedream-5-0-260128`）与 Doubao-Seedream-5.0-lite（`doubao-seedream-5-0-lite-260128`），通过火山方舟 `/images/generations` 调用。API Base URL 与 Key 可配置，Key 明文保存在本机设置并支持 `ARK_API_KEY` 环境变量兜底；最多 10 张参考图按 `referenceImageNodeIds` 顺序以 `image` 数组发送，只能是当前项目内单张不超过 10 MB 的 PNG/JPEG。单节点固定关闭组图；2K 尺寸使用官方参考值：16:9 `2816×1584`、9:16 `1584×2816`、4:3 `2368×1776`、1:1 `2048×2048`。Seedream 5.0 Pro 自定义宽高的官方总像素范围从 `1280×720`（921600）起，不得再将运行时某次报错误写为模型通用最低 3686400 像素。连接测试优先读取 `/models`，不支持时使用缺失 prompt 的鉴权探测，禁止为测试生成计费图片。

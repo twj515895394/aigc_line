@@ -50,6 +50,7 @@ import {
 import { buildCanvasNodeDetail, buildCanvasOverview } from '../shared/canvas-read-model'
 import { CanvasReferenceIndex } from '../shared/canvas-reference-index'
 import { retainCanvasNodeContent } from '../shared/canvas-node-content'
+import { syncCanvasArtifacts } from '../shared/canvas-artifacts'
 import { filterUnchangedNodeMeasurements } from '../shared/canvas-node-measurements'
 import { projectSnapshotWriter } from '../shared/snapshot-persistence'
 import { registerEditFlusher } from '../shared/pending-edits'
@@ -229,6 +230,7 @@ const KIND_LABELS: Record<StoryNodeKind, string> = {
   audio: '音频',
   upscale: '视频放大',
   director: '3D 导演台',
+  document: '文档产物',
 }
 /**
  * Registry-driven field picking: only fields declared writable for the node
@@ -1667,7 +1669,7 @@ const StoryNodeCard = memo(function StoryNodeCard({ id, data, selected }: NodePr
   )
 }, (previous, next) => previous.id === next.id && previous.data === next.data && previous.selected === next.selected)
 
-const nodeTypes = { storyNode: StoryNodeCard }
+const nodeTypes = { storyNode: (props: NodeProps<StoryNode>) => props.data.kind === 'document' ? null : <StoryNodeCard {...props} /> }
 const edgeTypes = { default: CanvasEdge }
 
 const makeNode = (kind: StoryNodeKind, index: number, position?: { x: number; y: number }): StoryNode => ({
@@ -2539,7 +2541,7 @@ function CanvasFlow() {
   }, [setNodes, setEdges])
 
   useEffect(() => {
-    if (!readyToSaveRef.current || artifacts.length === 0) return
+    if (!loaded || !readyToSaveRef.current || artifacts.length === 0) return
     const nodes = contentNodes
     const additions: StoryNode[] = []
     const linkedEdges: StoryEdge[] = []
@@ -2604,25 +2606,6 @@ function CanvasFlow() {
         continue
       }
 
-      if (existingArtifactNode) continue
-
-      if (artifact.type !== 'image') continue
-      const kind: StoryNodeKind = 'image'
-      additions.push({
-        ...makeNode(kind, sequence, {
-          x: 100 + (sequence % 3) * 470,
-          y: 100 + Math.floor(sequence / 3) * 380,
-        }),
-        data: {
-          kind,
-          title: artifact.title,
-          prompt: '',
-          preview: artifact.content,
-          artifactId: artifact.id,
-          sourcePath: artifact.path,
-          aspectRatio: '16:9',
-        },
-      })
     }
 
     if (additions.length > 0) {
@@ -2635,7 +2618,11 @@ function CanvasFlow() {
         return freshEdges.length > 0 ? [...current, ...freshEdges] : current
       })
     }
-  }, [artifacts, contentNodes, dismissedArtifacts, setEdges, setNodes])
+    const rect = canvasContainerRef.current?.getBoundingClientRect()
+    const center = rect ? screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }) : { x: 160, y: 120 }
+    setNodes(current => syncCanvasArtifacts(current, artifacts, dismissedArtifacts, makeNode,
+      (items, width) => vacantNodePosition(items, center, width)))
+  }, [artifacts, contentNodes, dismissedArtifacts, loaded, setEdges, setNodes, screenToFlowPosition])
 
   const handleNodesChange = useCallback((changes: NodeChange<StoryNode>[]) => {
     changes = filterUnchangedNodeMeasurements(changes, nodesRef.current)

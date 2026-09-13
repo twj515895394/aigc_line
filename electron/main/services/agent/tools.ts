@@ -1,27 +1,14 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
-import path from 'node:path';
-import fs from 'node:fs/promises';
 import { z } from 'zod';
 import log from 'electron-log/main';
-import type { Artifact, ChatMessage } from '../../../../src/shared/ipc.types';
+import type { ChatMessage } from '../../../../src/shared/ipc.types';
 import { messageHub } from '../message-hub';
 import { appendChatMessage } from '../project.store';
 import { pushArtifact } from './artifact';
+import { readArtifactFile } from './artifact-file';
 import { sendCanvasCommand } from './canvas-bridge';
 import { analyzeVideoWithQwen } from '../qwen-video-analysis.service';
 import { directorProjectSchema } from '../../../../src/shared/director-schema';
-
-/** Image extensions -> MIME types supported as image artifacts */
-const IMAGE_MIME: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
-  '.bmp': 'image/bmp',
-  '.avif': 'image/avif',
-};
 
 /**
  * Create the PushArtifact MCP server. The agent calls PushArtifact with a
@@ -164,43 +151,26 @@ export function createCanvasTools(projectId: string, folderPath: string) {
       ),
       tool(
         'PushArtifact',
-        'Push a workspace file (markdown, html, or image) to the canvas. For video plans, create image/video nodes with the Canvas tools instead of pushing a storyboard table.',
+        'Display a project-local file: Markdown, HTML and common UTF-8 text/code files appear as compact chat cards, opened in a large reading dialog on click, never as canvas nodes. Images also become image nodes on the canvas. Re-pushing the same file updates the content available from its chat cards and preserves existing image node placement. Text limit 1 MB, image limit 20 MB. Unsupported/binary files are rejected. For video/audio outputs use CreateCanvasNodes with video/audio kind and sourcePath; for video plans create image/video nodes instead of a storyboard table.',
         {
           path: z.string().describe('Path to the file, relative to the workspace or absolute'),
           title: z.string().describe('A short title for the artifact'),
-          width: z.number().optional().describe('Width of the artifact on canvas in pixels, default 400'),
-          height: z.number().optional().describe('Height of the artifact on canvas in pixels, default 300'),
+          width: z.number().min(360).max(1200).optional().describe('Legacy preview width; optional and ignored by the responsive chat reader'),
+          height: z.number().min(240).max(1000).optional().describe('Legacy preview height; optional and ignored by the responsive chat reader'),
         },
         async (args) => {
           log.info('[PushArtifact] Tool called:', args.path, args.title);
           try {
-            // Resolve within the workspace - reject paths that escape it
-            const filePath = path.resolve(folderPath, args.path);
-            if (!filePath.startsWith(path.resolve(folderPath) + path.sep)) {
-              throw new Error(`Path is outside the workspace: ${args.path}`);
-            }
-            const ext = path.extname(filePath).toLowerCase();
-            const imageMime = IMAGE_MIME[ext];
-            let type: Artifact['type'];
-            let content: string;
-            if (imageMime) {
-              // Images travel as self-contained data URLs so canvas snapshots stay portable
-              type = 'image';
-              const buf = await fs.readFile(filePath);
-              content = `data:${imageMime};base64,${buf.toString('base64')}`;
-            } else {
-              content = await fs.readFile(filePath, 'utf-8');
-              type = ext === '.html' || ext === '.htm' ? 'html' : 'markdown';
-            }
+            const file = await readArtifactFile(projectId, folderPath, args.path);
             const artifact = pushArtifact(
               projectId,
-              type,
+              file.type,
               args.title,
-              content,
-              args.width,
-              args.height,
+              file.content,
+              args.width ?? 640,
+              args.height ?? 420,
               // Store the workspace-relative path so edits can be saved back to the file
-              path.relative(folderPath, filePath),
+              file.path,
             );
             // Also persist as a chat message so it survives reloads
             const artifactMsg: ChatMessage = {

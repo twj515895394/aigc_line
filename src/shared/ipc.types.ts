@@ -187,7 +187,7 @@ export interface CanvasNodeRef {
 }
 
 // Live canvas bridge used by the Agent's Canvas MCP tools.
-export type CanvasNodeKind = 'image' | 'image-editor' | 'video' | 'audio' | 'upscale' | 'director';
+export type CanvasNodeKind = 'image' | 'image-editor' | 'video' | 'audio' | 'upscale' | 'director' | 'document';
 
 export interface SaveImageEditRequest {
   projectId: string;
@@ -256,6 +256,9 @@ export interface CanvasNodeData extends Record<string, unknown> {
   prompt?: string;
   preview?: string;
   artifactId?: string;
+  artifactUpdatedAt?: number;
+  /** Legacy canvas document payload; migrated into chat history on project load. */
+  document?: { format: 'markdown' | 'html'; content: string; width: number; height: number };
   aspectRatio?: ImageAspectRatio;
   sourcePath?: string;
   sourceHistory?: string[];

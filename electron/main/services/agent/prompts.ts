@@ -21,7 +21,7 @@ export function buildUserPrompt(userMessage: ChatMessage, folderPath: string): s
     const refLines = userMessage.artifactRefs
       .map((r) => `- 《${r.title}》(${r.type})${r.path ? ` at ${r.path}` : ''}`)
       .join('\n');
-    contextBlocks.push(`用户在画布上选中了以下产物作为本轮消息的引用（说明用户想修改它或参考它；如需修改，直接用 Read/Edit 操作对应文件，改完调用 PushArtifact 重新推送即可，前端会原地更新卡片而不是新增）：\n${refLines}`);
+    contextBlocks.push(`用户选择了以下产物作为本轮消息的引用（说明用户想修改它或参考它；如需修改，直接用 Read/Edit 操作对应文件，改完调用 PushArtifact 重新推送即可，前端会原地更新卡片而不是新增）：\n${refLines}`);
   }
 
   if (userMessage.attachments && userMessage.attachments.length > 0) {
@@ -48,20 +48,21 @@ export function buildUserPrompt(userMessage: ChatMessage, folderPath: string): s
 
 /**
  * Appended to the claude_code preset system prompt: workspace location and
- * how/when to push artifacts to the canvas.
+ * how/when to show artifacts in chat or on the canvas.
  */
 export function buildSystemPromptAppend(folderPath: string): string {
   return `你的工作目录是：${folderPath}
 
 你运行在 AIGC CANVAS 桌面应用中。不要建议用户运行 claude、claude --resume 或其他 Claude Code 终端命令；会话和上下文操作由应用界面负责。
 
-当你完成的任务产出了有意义的结果时（比如编写代码、生成报告、制作可视化页面等），应该使用 PushArtifact 工具把结果展示到用户的画布上。先把结果写入工作目录中的文件，然后再调用 PushArtifact 并传入文件路径——内容会直接从磁盘读取，所以不要把内容粘贴到工具调用的参数里。PushArtifact 工具的参数如下：
-- path：文件路径（相对于工作目录的路径或绝对路径均可）。artifact 类型会根据扩展名自动推断：.html/.htm 渲染为 html，其余一律渲染为 markdown
+当你完成的任务产出了有意义的结果时（比如编写代码、生成报告、制作可视化页面等），应该使用 PushArtifact 工具展示结果：Markdown、HTML 和文本/代码只显示为聊天中的轻量卡片，用户点击后在弹窗阅读；图片同时显示在画布上。先把结果写入工作目录中的文件，然后再调用 PushArtifact 并传入文件路径——内容会直接从磁盘读取，所以不要把内容粘贴到工具调用的参数里。PushArtifact 工具的参数如下：
+- path：项目内文件路径（相对或绝对路径均可）。图片生成 image 节点；.md/.markdown、.html/.htm 和常用 UTF-8 文本/代码生成聊天产物卡片，点击后弹窗预览。文本上限 1 MB，图片上限 20 MB。不支持 PDF/Office/压缩包等二进制文件；视频/音频使用 CreateCanvasNodes 的 video/audio 和 sourcePath。
 - title：artifact 的简短标题
+- width / height：旧版预览尺寸兼容参数，可以省略；聊天阅读弹窗自适应窗口。相同文件重新推送后，聊天卡片打开最新内容；图片节点保留位置和连线。文档不创建画布节点；修改时编辑源文件后重新推送。
 
 例如，把报告写入 report.md 之后，调用 PushArtifact 并传入 path="report.md"、title="报告"。
 
-当 HTML artifact 需要引用工作目录内的文件时（上传的图片、生成的素材、数据文件等），请使用相对于工作目录根目录的相对路径，例如 src="uploads/photo.png" 或 href="./assets/style.css"——渲染时会自动解析。不要把大体积资源以 base64 data URL 的形式内联到代码里。
+当 HTML artifact 需要引用项目内文件时，使用相对于 HTML 源文件所在目录的路径（例如 generated/report.html 用 ../uploads/photo.png）。HTML 在隔离 iframe 内运行，可执行脚本但不能访问应用或 Electron API；不要依赖同源权限、顶层导航、弹窗或本地存储。不要把大体积资源以 base64 data URL 内联。
 
 你具备 AIGC 短剧分镜创作能力，并且可以通过 Canvas 工具直接读取和修改实时画布。需要了解画布规模或查找节点 ID 时调用 GetCanvasOverview，它只返回轻量摘要；需要某个节点的 prompt、媒体路径、生成状态、引用或连接详情时，用精确 nodeId 调用 GetCanvasNode。用户已经引用节点时直接读取该节点，不要先获取全画布概览。画布写入采用最后写入者生效，不要传版本号。
 

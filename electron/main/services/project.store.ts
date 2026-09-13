@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { migrateCanvasDocuments } from '../../../src/shared/canvas-artifacts';
 import { normalizeProjectAgent, type AgentProvider } from '../../../src/shared/agent-config';
 import fs from 'node:fs/promises';
 import { app } from 'electron';
@@ -222,6 +223,8 @@ async function loadChatIndex(folderPath: string, forWrite: boolean): Promise<Cha
   return cached;
 }
 export async function readChatHistory(folderPath: string): Promise<ChatMessage[]> {
+  // Migration must finish before history is returned, even when canvas/history load concurrently.
+  await readCanvasSnapshot(folderPath).catch(error => log.warn('[ProjectStore] Document migration deferred; original canvas preserved:', error));
   return serializeFileOperation(chatEventsPath(folderPath), async () => structuredClone((await loadChatIndex(folderPath, false)).messages));
 }
 async function writeChatEvent(folderPath: string, cached: ChatIndex, event: ChatHistoryEvent): Promise<void> {
@@ -285,13 +288,39 @@ export async function writeSessionId(folderPath: string, sessionId: string, prov
 // Canvas snapshot persistence
 export async function readCanvasSnapshot(folderPath: string): Promise<unknown | null> {
   const filePath = path.join(folderPath, PROJECT_DIR_NAME, CANVAS_SNAPSHOT_FILE);
-  try {
-    const data = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(data);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw new Error(`画布快照读取失败，原文件已保留：${error instanceof Error ? error.message : String(error)}`);
-  }
+  return serializeFileOperation(filePath, async () => {
+    try {
+      let data: string;
+      try { data = await fs.readFile(filePath, 'utf-8'); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+      const parsed: unknown = JSON.parse(data);
+      const migration = migrateCanvasDocuments(parsed);
+      if (!migration) return parsed;
+      // Keep the complete original layout; never remove nodes before chat is safely persisted.
+      await atomicWriteFile(filePath + '.before-chat-documents.bak', data);
+      await serializeFileOperation(chatEventsPath(folderPath), async () => {
+        const cached = await loadChatIndex(folderPath, true);
+        for (const artifact of migration.artifacts) {
+          const existing = cached.messages.some(message => message.artifact && (
+            message.artifact.id === artifact.id || (!!artifact.path && message.artifact.path?.replace(/\\/g, '/') === artifact.path.replace(/\\/g, '/'))
+          ) && (message.artifact.timestamp > artifact.timestamp || (
+            message.artifact.timestamp === artifact.timestamp && message.artifact.content === artifact.content
+          )));
+          if (existing) continue;
+          const message: ChatMessage = { id: `msg-document-${uuidv4()}`, role: 'assistant',
+            content: `Artifact: ${artifact.title}`, timestamp: artifact.timestamp, artifact };
+          await writeChatEvent(folderPath, cached, { version: 1, seq: cached.nextSeq, type: 'message.created', message });
+        }
+      });
+      await atomicWriteFile(filePath, JSON.stringify(migration.snapshot));
+      return migration.snapshot;
+    } catch (error) {
+      throw new Error(`画布快照读取失败，原文件已保留：${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
 }
 
 export async function writeCanvasSnapshot(folderPath: string, snapshot: unknown): Promise<void> {

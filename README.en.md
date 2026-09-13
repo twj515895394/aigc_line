@@ -181,6 +181,10 @@ Production build:
 pnpm build
 ~~~
 
+## Chat Document Artifacts
+
+Agents can use `PushArtifact` to display project-local Markdown, UTF-8 text/code, and HTML as compact chat cards. Clicking a card opens a large reading dialog; content mounts only while the dialog is open and is never rendered on the canvas. Re-pushing the same file makes its latest content available from the cards. Legacy canvas documents are backed up and preserved in chat before migration; image artifacts still use canvas nodes. HTML resources resolve relative to the source file. Documents are limited to 1 MB and images to 20 MB. PDF, Office, and archives are unsupported; video/audio use media nodes.
+
 ## Scripts
 
 Windows builds produce two x64 executables in `release/<version>/`:

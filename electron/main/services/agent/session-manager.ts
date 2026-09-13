@@ -29,6 +29,7 @@ import { extractMessageText } from './stream';
 import { createBuiltinPluginConfig, resolveBuiltinPluginPath } from './builtin-plugin';
 import { scanAvailableSkills } from './skills';
 import { mergeDiscoveredSkills } from './skill-metadata';
+import { getClaudeExecutablePath } from './claude-runtime';
 
 /** MCP tools exposed to every session (bare names match mcp__push-artifact__*). */
 const CANVAS_MCP_TOOLS = [
@@ -233,6 +234,7 @@ async function pump(session: ProjectAgentSession): Promise<void> {
       const stream = query({
         prompt: inputStream(session),
         options: {
+          pathToClaudeCodeExecutable: getClaudeExecutablePath(),
           allowedTools: [...allowedTools, ...CANVAS_MCP_TOOLS],
           cwd: folderPath,
           model: session.model || undefined,

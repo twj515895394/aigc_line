@@ -1,6 +1,7 @@
 import type { Attachment, ChatMessage } from '../shared/ipc.types';
 import { memo, useEffect, useState } from 'react';
 import { Markdown } from './Markdown';
+import { ChatArtifactCard } from './ChatArtifactCard';
 
 interface ChatMessageProps {
   message: ChatMessage;
@@ -260,15 +261,7 @@ function ChatMessageItemComponent({ message }: ChatMessageProps) {
         </div>
         <div className='min-w-0 max-w-[90%] flex-1 rounded-2xl rounded-tl-sm border border-[#d4af37]/15 bg-gradient-to-br from-white/[0.045] to-[#d4af37]/[0.025] px-4 py-3 text-sm leading-relaxed text-[#e8e6df]'>
           <div className='mb-1 text-xs text-[#8a8794]'>生成了产物:</div>
-          <div className='flex items-center gap-2 rounded-lg border border-[#d4af37]/20 bg-[#d4af37]/[0.06] px-3 py-2'>
-            <svg className='h-4 w-4 text-[#e8c766]' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
-              <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' />
-            </svg>
-            <span className='text-xs font-medium text-[#e8e6df]'>{art.title}</span>
-            <span className='ml-auto rounded bg-[#d4af37]/15 px-1.5 py-0.5 text-[10px] text-[#e8c766]'>
-              {art.type === 'image' ? '图片' : art.type === 'storyboard' ? '分镜表' : art.type}
-            </span>
-          </div>
+          <ChatArtifactCard artifact={art} />
           <div className='mt-1 text-xs text-[#6d6a78]'>
             {formatTime(message.timestamp)}
           </div>

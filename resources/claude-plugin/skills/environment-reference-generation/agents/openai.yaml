@@ -1,4 +1,4 @@
 interface:
   display_name: "场景参考图生成"
-  short_description: "为短剧生成无人高机位空间全景，并保持布局、材质与灯光连续"
-  default_prompt: "Use $environment-reference-generation to create reusable, empty high-angle environment reference images for my scenes."
+  short_description: "为短剧生成无人场景正面、左侧、右侧、背面四宫格，保持空间与灯光一致"
+  default_prompt: "Use $environment-reference-generation to create reusable, empty 2×2 environment reference images showing Front, Left, Right, and Back views of each scene."

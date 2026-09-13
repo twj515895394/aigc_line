@@ -43,7 +43,7 @@ function MarkdownCard({ artifact, onClose }: ArtifactCardProps) {
         </svg>
       }
     >
-      <div className="flex-1 overflow-auto p-3">
+      <div className="nodrag nowheel min-h-0 flex-1 overflow-auto p-4" onPointerDown={event => event.stopPropagation()}>
         <Markdown className="text-sm text-[#d6d3c8]">{artifact.content}</Markdown>
       </div>
     </CardShell>
@@ -78,7 +78,8 @@ function HtmlCard({ artifact, onClose }: ArtifactCardProps) {
   const projectId = useAppStore((s) => s.currentProject?.id)
   // Relative URLs in the artifact resolve against the project workspace
   // (served by the workspace:// protocol registered in the main process)
-  const baseTag = projectId ? `<base href="workspace://${projectId}/">` : ''
+  const directory = artifact.path?.replace(/\\/g, '/').split('/').slice(0, -1).map(encodeURIComponent).join('/')
+  const baseTag = projectId ? `<base href="workspace://${encodeURIComponent(projectId)}/${directory ? `${directory}/` : ''}">` : ''
 
   // Wrap content in a full HTML document if not already
   const wrappedContent = (() => {
@@ -118,7 +119,7 @@ ${content}
         </svg>
       }
     >
-      <div className="flex-1 overflow-hidden bg-white">
+      <div className="nodrag nowheel min-h-0 flex-1 overflow-hidden bg-white" onPointerDown={event => event.stopPropagation()}>
         <iframe
           srcDoc={wrappedContent}
           className="h-full w-full border-0"
