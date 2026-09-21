@@ -166,7 +166,7 @@ AIGC CANVAS：Electron 桌面应用，把 Claude Code / Codex Agent（对话）�
 2. **画布 command 容错设计**：`pickMutableNodeData` 对未注册字段静默忽略（有意为之）。字段必须先注册进能力表才写得到节点上。
 3. **kind 级动作**：生成类动作用 `registerNodeKindAction`（注册一次，离屏节点也能触发），不要用 per-node 注册。
 4. **ComfyUI 工作流**：VHS_VideoCombine 的 `frame_rate` 最小为 1，不能填 0；要跟随源视频帧率就接 VHS_VideoInfo。节点参数注入用 `setInput(nodeId, field, value)`，节点 id 以 workflow JSON 为准。
-5. **预览地址**：节点 `preview` 一律由 `sourcePath` 派生为 `workspace://<projectId>/<rel-path>`（每段 encodeURIComponent），不要手写 file://。
+5. **预览地址**：节点 `preview` 一律由 `sourcePath` 派生为 `workspace://<projectId>/<rel-path>`（每段 encodeURIComponent），不要手写 file://。缩略图缓存按完整 URL（含版本）区分：Agent 创建或明确更新 `sourcePath` 时生成新的 `?v=`，即使路径相同也刷新；生成完成和任务恢复共用任务 ID 作为稳定版本，资产拖入节点保留 `modifiedAt` 版本。仅改标题、提示词、位置不换版本；版本随画布快照持久化，不能在渲染或轮询时随机刷新。
 6. **生成状态**：`generationStatus`（idle/generating/error）是只读轮询字段；异步动作完成后必须复位，加载快照时会把残留的 generating 重置为 idle。
 7. **路径安全**：上传媒体前校验路径必须位于项目目录内（`uploadReferenceMedia` 已有检查，新代码沿用）。
 8. **提交前验证**：`pnpm typecheck` 必须通过；`pnpm test`（vitest）不要跑挂；UI 改动大的话跑 `pnpm test:e2e`（Playwright）。

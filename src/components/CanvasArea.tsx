@@ -1688,8 +1688,9 @@ const makeNode = (kind: StoryNodeKind, index: number, position?: { x: number; y:
   },
 })
 
-const workspacePreview = (projectId: string, relativePath: string): string => (
+const workspacePreview = (projectId: string, relativePath: string, version?: string | number): string => (
   `workspace://${projectId}/${relativePath.split('/').map(encodeURIComponent).join('/')}`
+  + (version === undefined ? '' : `?v=${encodeURIComponent(version)}`)
 )
 
 const makeProjectMediaNode = (
@@ -1705,7 +1706,7 @@ const makeProjectMediaNode = (
       ...node.data,
       title: asset.name,
       sourcePath: asset.relativePath,
-      preview: workspacePreview(projectId, asset.relativePath),
+      preview: workspacePreview(projectId, asset.relativePath, asset.modifiedAt),
     },
   }
 }
@@ -1905,12 +1906,12 @@ function CanvasFlow() {
       : node))
   }
 
-  const applyGenerationResult = async (nodeId: string, projectId: string, relativePath: string) => {
+  const applyGenerationResult = async (nodeId: string, projectId: string, relativePath: string, taskId?: string) => {
     if (projectIdRef.current !== projectId) return
     const node = nodesRef.current.find((item) => item.id === nodeId)
     if (!node) return
     await persistNode(nodeId, {
-      preview: workspacePreview(projectId, relativePath), sourcePath: relativePath,
+      preview: workspacePreview(projectId, relativePath, taskId ?? crypto.randomUUID()), sourcePath: relativePath,
       sourceHistory: node.data.sourcePath && node.data.sourcePath !== relativePath
         ? [...(node.data.sourceHistory ?? []), node.data.sourcePath] : node.data.sourceHistory ?? [],
       generationStatus: 'idle', generationError: '',
@@ -1952,9 +1953,13 @@ function CanvasFlow() {
           } else {
             if (node.data.kind !== task.operation) continue
             const relativePath = task.relativePath
+            // Reuse the live completion's version when restoring a result.
+            // A preview-only difference can be a later explicit media update;
+            // retrying an acknowledgement must not overwrite that newer edit.
+            const preview = workspacePreview(projectId, relativePath, task.taskId)
             if (node.data.sourcePath !== relativePath || node.data.generationStatus !== 'idle' || node.data.generationError) {
               nextNodes = nextNodes.map((item) => item.id === node.id ? { ...item, data: { ...item.data,
-                sourcePath: relativePath, preview: workspacePreview(projectId, relativePath), generationStatus: 'idle', generationError: '',
+                sourcePath: relativePath, preview, generationStatus: 'idle', generationError: '',
                 sourceHistory: item.data.sourcePath && item.data.sourcePath !== relativePath ? [...(item.data.sourceHistory ?? []), item.data.sourcePath] : item.data.sourceHistory ?? [],
               } } : item)
             }
@@ -2032,7 +2037,7 @@ function CanvasFlow() {
       if (!result.success || !result.relativePath) {
         throw new Error(result.error || '图片生成服务没有返回图片')
       }
-      await applyGenerationResult(nodeId, project.id, result.relativePath)
+      await applyGenerationResult(nodeId, project.id, result.relativePath, result.promptId)
       await recoverTasks()
     } catch (error) {
       if (projectIdRef.current !== project.id) return
@@ -2108,7 +2113,7 @@ function CanvasFlow() {
       if (!result.success || !result.relativePath) {
         throw new Error(result.error || '视频生成服务没有返回视频')
       }
-      await applyGenerationResult(nodeId, project.id, result.relativePath)
+      await applyGenerationResult(nodeId, project.id, result.relativePath, result.promptId)
       await recoverTasks()
     } catch (error) {
       if (projectIdRef.current !== project.id) return
@@ -2149,7 +2154,7 @@ function CanvasFlow() {
       if (!result.success || !result.relativePath) {
         throw new Error(result.error || 'ComfyUI 没有返回放大后的视频')
       }
-      await applyGenerationResult(nodeId, project.id, result.relativePath)
+      await applyGenerationResult(nodeId, project.id, result.relativePath, result.promptId)
       await recoverTasks()
     } catch (error) {
       if (projectIdRef.current !== project.id) return
@@ -2355,7 +2360,7 @@ function CanvasFlow() {
               (kind === 'image' || kind === 'image-editor' || kind === 'video' || kind === 'audio' || kind === 'upscale' || kind === 'director') &&
               data.sourcePath && !data.preview
             ) {
-              data.preview = `workspace://${currentProject.id}/${data.sourcePath.split('/').map(encodeURIComponent).join('/')}`
+              data.preview = workspacePreview(currentProject.id, data.sourcePath, crypto.randomUUID())
             }
             return {
               ...base,
@@ -2393,8 +2398,10 @@ function CanvasFlow() {
               (node.data.kind === 'image' || node.data.kind === 'image-editor' || node.data.kind === 'video' || node.data.kind === 'audio' || node.data.kind === 'upscale' || node.data.kind === 'director') &&
               typeof update.sourcePath === 'string' && !('preview' in update)
             ) {
+              // Explicitly writing sourcePath signals new media, even when a
+              // file was replaced in place. Non-media edits keep the cache key.
               data.preview = update.sourcePath
-                ? `workspace://${currentProject.id}/${update.sourcePath.split('/').map(encodeURIComponent).join('/')}`
+                ? workspacePreview(currentProject.id, update.sourcePath, crypto.randomUUID())
                 : undefined
             }
             return { ...node, position, data }
@@ -2906,7 +2913,7 @@ function CanvasFlow() {
             ) : (
               <div className="grid grid-cols-2 gap-2.5">
                 {visibleProjectAssets.map((asset) => {
-                  const preview = currentProject ? workspacePreview(currentProject.id, asset.relativePath) : ''
+                  const preview = currentProject ? workspacePreview(currentProject.id, asset.relativePath, asset.modifiedAt) : ''
                   return (
                     <div
                       key={asset.relativePath}
@@ -2919,7 +2926,7 @@ function CanvasFlow() {
                       title="拖拽到画布创建节点"
                     >
                       <div className="flex h-24 items-center justify-center overflow-hidden bg-black/35">
-                        <ProjectAssetPreview url={`${preview}?v=${asset.modifiedAt}`} kind={asset.kind} name={asset.name} />
+                        <ProjectAssetPreview url={preview} kind={asset.kind} name={asset.name} />
                       </div>
                       <div className="p-2.5">
                         <p className="truncate text-[10px] text-white/70">{asset.name}</p>
