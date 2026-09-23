@@ -255,6 +255,7 @@ export interface CanvasNodeData extends Record<string, unknown> {
   title: string;
   prompt?: string;
   preview?: string;
+  /** Legacy metadata on canvas nodes created by older artifact synchronization. */
   artifactId?: string;
   artifactUpdatedAt?: number;
   /** Legacy canvas document payload; migrated into chat history on project load. */

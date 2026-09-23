@@ -151,7 +151,7 @@ export function createCanvasTools(projectId: string, folderPath: string) {
       ),
       tool(
         'PushArtifact',
-        'Display a project-local file: Markdown, HTML and common UTF-8 text/code files appear as compact chat cards, opened in a large reading dialog on click, never as canvas nodes. Images also become image nodes on the canvas. Re-pushing the same file updates the content available from its chat cards and preserves existing image node placement. Text limit 1 MB, image limit 20 MB. Unsupported/binary files are rejected. For video/audio outputs use CreateCanvasNodes with video/audio kind and sourcePath; for video plans create image/video nodes instead of a storyboard table.',
+        'Display a project-local file as a compact chat artifact card. Images, Markdown, HTML and common UTF-8 text/code open in a large dialog on click; PushArtifact never creates or updates canvas nodes. Re-pushing the same file updates the content opened from its chat cards. To place an image on the canvas, use CreateCanvasNodes with image kind and a project-relative sourcePath, or UpdateCanvasNodes for an existing node. Text limit 1 MB, image limit 20 MB. Unsupported/binary files are rejected; use CreateCanvasNodes with video/audio kind and sourcePath for video/audio outputs.',
         {
           path: z.string().describe('Path to the file, relative to the workspace or absolute'),
           title: z.string().describe('A short title for the artifact'),

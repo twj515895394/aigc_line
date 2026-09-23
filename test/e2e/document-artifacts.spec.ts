@@ -91,3 +91,48 @@ test('documents migrate to lightweight chat cards and only render in the reading
     await expect.poll(async () => (await snapshot())?.nodes?.map(node => node.id)).toEqual(['keep-image'])
   } finally { await app.close() }
 })
+
+test('pushed image artifacts stay in chat and open without creating canvas nodes', async () => {
+  test.setTimeout(90_000)
+  const folder = path.join(root, 'test-results', `image-artifacts-${randomUUID()}`)
+  await fs.mkdir(path.join(folder, 'reports'), { recursive: true })
+  await fs.writeFile(path.join(folder, 'reports', 'preview.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="#d4af37"/></svg>')
+  let app = await electron.launch({ args: ['.', '--no-sandbox', `--user-data-dir=${folder}/profile`], cwd: root })
+  try {
+    let page = await app.firstWindow()
+    await page.getByRole('heading', { name: '我的项目', exact: true }).waitFor()
+    const project = await page.evaluate(async folder => {
+      const project = await window.electronAPI.createProject('图片产物验证', folder, { provider: 'codex', model: '' })
+      await window.electronAPI.loadProject(project.id)
+      return project
+    }, folder)
+    await page.reload()
+    await page.locator('.react-flow').waitFor()
+    const artifact: Artifact = {
+      id: 'image-artifact', type: 'image', title: '图片产物', path: 'reports/preview.svg',
+      content: `workspace://${project.id}/reports/preview.svg?v=1`, width: 640, height: 420, timestamp: 100,
+    }
+    const message = { id: 'image-message', role: 'assistant' as const, content: 'Artifact: 图片产物', timestamp: 100, artifact }
+    await app.evaluate(({ BrowserWindow }, payload) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      window.webContents.send('artifact:receive', { projectId: payload.projectId, artifact: payload.artifact })
+      window.webContents.send('chat:receiveMessage', { projectId: payload.projectId, message: payload.message })
+    }, { projectId: project.id, artifact, message })
+    const card = page.getByRole('button', { name: '查看产物：图片产物', exact: true })
+    await expect(card).toBeVisible()
+    await expect(page.locator('.react-flow__node')).toHaveCount(0)
+    await card.click()
+    const dialog = page.getByRole('dialog', { name: '阅读产物：图片产物' })
+    await expect.poll(() => dialog.getByRole('img', { name: '图片产物' }).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(80)
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+    await app.close()
+
+    await fs.appendFile(path.join(folder, '.aigc-line', 'chat-events.jsonl'), JSON.stringify({ version: 1, seq: 1, type: 'message.created', message }) + '\n')
+    app = await electron.launch({ args: ['.', '--no-sandbox', `--user-data-dir=${folder}/profile`], cwd: root })
+    page = await app.firstWindow()
+    await expect(page.getByRole('button', { name: '查看产物：图片产物', exact: true })).toBeVisible()
+    await expect(page.locator('.react-flow__node')).toHaveCount(0)
+    await page.getByRole('button', { name: '查看产物：图片产物', exact: true }).click()
+    await expect.poll(() => page.getByRole('dialog', { name: '阅读产物：图片产物' }).getByRole('img', { name: '图片产物' }).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(80)
+  } finally { await app.close() }
+})

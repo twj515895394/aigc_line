@@ -48,17 +48,17 @@ export function buildUserPrompt(userMessage: ChatMessage, folderPath: string): s
 
 /**
  * Appended to the claude_code preset system prompt: workspace location and
- * how/when to show artifacts in chat or on the canvas.
+ * how to show chat artifacts and explicitly create canvas nodes.
  */
 export function buildSystemPromptAppend(folderPath: string): string {
   return `你的工作目录是：${folderPath}
 
 你运行在 AIGC CANVAS 桌面应用中。不要建议用户运行 claude、claude --resume 或其他 Claude Code 终端命令；会话和上下文操作由应用界面负责。
 
-当你完成的任务产出了有意义的结果时（比如编写代码、生成报告、制作可视化页面等），应该使用 PushArtifact 工具展示结果：Markdown、HTML 和文本/代码只显示为聊天中的轻量卡片，用户点击后在弹窗阅读；图片同时显示在画布上。先把结果写入工作目录中的文件，然后再调用 PushArtifact 并传入文件路径——内容会直接从磁盘读取，所以不要把内容粘贴到工具调用的参数里。PushArtifact 工具的参数如下：
-- path：项目内文件路径（相对或绝对路径均可）。图片生成 image 节点；.md/.markdown、.html/.htm 和常用 UTF-8 文本/代码生成聊天产物卡片，点击后弹窗预览。文本上限 1 MB，图片上限 20 MB。不支持 PDF/Office/压缩包等二进制文件；视频/音频使用 CreateCanvasNodes 的 video/audio 和 sourcePath。
+当你完成的任务产出了有意义的结果时（比如编写代码、生成报告、制作可视化页面等），可以使用 PushArtifact 工具在聊天区展示：图片、Markdown、HTML 和文本/代码均显示为轻量卡片，用户点击后在弹窗查看。PushArtifact 不创建或更新任何画布节点；需要把图片放到画布时，明确调用 CreateCanvasNodes 创建 image 节点并设置项目内 sourcePath，已有节点则调用 UpdateCanvasNodes。先把结果写入工作目录中的文件，然后再调用 PushArtifact 并传入文件路径——内容会直接从磁盘读取，所以不要把内容粘贴到工具调用的参数里。PushArtifact 工具的参数如下：
+- path：项目内文件路径（相对或绝对路径均可）。图片、.md/.markdown、.html/.htm 和常用 UTF-8 文本/代码只生成聊天产物卡片，点击后弹窗预览。文本上限 1 MB，图片上限 20 MB。不支持 PDF/Office/压缩包等二进制文件；视频/音频使用 CreateCanvasNodes 的 video/audio 和 sourcePath。
 - title：artifact 的简短标题
-- width / height：旧版预览尺寸兼容参数，可以省略；聊天阅读弹窗自适应窗口。相同文件重新推送后，聊天卡片打开最新内容；图片节点保留位置和连线。文档不创建画布节点；修改时编辑源文件后重新推送。
+- width / height：旧版预览尺寸兼容参数，可以省略；聊天阅读弹窗自适应窗口。相同文件重新推送后，聊天卡片打开最新内容；修改时编辑源文件后重新推送。已存在的画布图片节点不会随 PushArtifact 自动更新，需要时明确调用 UpdateCanvasNodes。
 
 例如，把报告写入 report.md 之后，调用 PushArtifact 并传入 path="report.md"、title="报告"。
 

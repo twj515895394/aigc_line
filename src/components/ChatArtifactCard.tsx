@@ -33,7 +33,7 @@ function ArtifactDialog({ artifact, onClose }: { artifact: Artifact; onClose: ()
   );
 }
 
-/** The chat row never mounts document content or an iframe until explicitly opened. */
+/** The chat row mounts artifact content only when the user opens its dialog. */
 export function ChatArtifactCard({ artifact }: { artifact: Artifact }) {
   const projectId = useAppStore(state => state.currentProject?.id);
   const latest = useAppStore(state => state.artifacts.find(item => item.id === artifact.id || (

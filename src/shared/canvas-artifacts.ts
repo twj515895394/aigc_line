@@ -1,34 +1,4 @@
-import type { Artifact, CanvasNodeSnapshot, CanvasPoint, CanvasNodeKind } from './ipc.types';
-
-const normalizePath = (value?: string) => value?.replace(/\\/g, '/');
-
-/** Keep source-file identity, node placement and user connections across re-push/reload. */
-export function syncCanvasArtifacts<T extends CanvasNodeSnapshot>(
-  nodes: T[], artifacts: Artifact[], dismissed: Record<string, number>,
-  create: (kind: CanvasNodeKind, index: number, position: CanvasPoint) => T,
-  place: (nodes: T[], width: number) => CanvasPoint,
-): T[] {
-  let result = nodes;
-  for (const artifact of artifacts) {
-    if (artifact.type !== 'image' || (dismissed[artifact.id] ?? -1) >= artifact.timestamp) continue;
-    const kind = 'image';
-    const index = result.findIndex(node => node.data.artifactId === artifact.id || (
-      !!node.data.artifactId && !!artifact.path && normalizePath(node.data.sourcePath) === normalizePath(artifact.path)
-    ));
-    const existing = index < 0 ? undefined : result[index];
-    // Replaying history must not overwrite later user edits (such as the title).
-    if (existing && (existing.data.artifactUpdatedAt ?? -1) >= artifact.timestamp) continue;
-    const base = existing ?? create(kind, result.length + 1, place(result, 620));
-    const next: T = { ...base, data: {
-      ...base.data, kind, title: artifact.title, artifactId: artifact.id,
-      artifactUpdatedAt: artifact.timestamp, sourcePath: artifact.path,
-      preview: artifact.content,
-    } };
-    if (result === nodes) result = [...nodes];
-    if (index < 0) result.push(next); else result[index] = next;
-  }
-  return result;
-}
+import type { Artifact } from './ipc.types';
 
 /** Preserve legacy document payloads in chat before removing their canvas nodes. */
 export function migrateCanvasDocuments(value: unknown): { snapshot: Record<string, unknown>; artifacts: Artifact[] } | null {

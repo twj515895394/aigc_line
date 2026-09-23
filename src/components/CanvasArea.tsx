@@ -50,7 +50,6 @@ import {
 import { buildCanvasNodeDetail, buildCanvasOverview } from '../shared/canvas-read-model'
 import { CanvasReferenceIndex } from '../shared/canvas-reference-index'
 import { retainCanvasNodeContent } from '../shared/canvas-node-content'
-import { syncCanvasArtifacts } from '../shared/canvas-artifacts'
 import { filterUnchangedNodeMeasurements } from '../shared/canvas-node-measurements'
 import { projectSnapshotWriter } from '../shared/snapshot-persistence'
 import { registerEditFlusher } from '../shared/pending-edits'
@@ -265,21 +264,6 @@ const isFlowSnapshot = (value: unknown): value is FlowSnapshot => {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<FlowSnapshot>
   return candidate.type === 'react-flow' && Array.isArray(candidate.nodes) && Array.isArray(candidate.edges)
-}
-
-const parseStoryboard = (content: string): StoryboardShot[] => {
-  try {
-    const value: unknown = JSON.parse(content)
-    if (!Array.isArray(value)) return []
-    return value.filter((shot): shot is StoryboardShot => (
-      !!shot &&
-      typeof shot === 'object' &&
-      typeof (shot as Partial<StoryboardShot>).index === 'number' &&
-      typeof (shot as Partial<StoryboardShot>).scene === 'string'
-    ))
-  } catch {
-    return []
-  }
 }
 
 /** Remove retired shot/text nodes and upgrade legacy storyboard tables to image → video chains. */
@@ -2546,90 +2530,6 @@ function CanvasFlow() {
     setNodes(restored); setEdges(value.edges); setDismissedArtifacts(value.dismissedArtifacts ?? {})
     setHistoryState({ undo: historyRef.current.canUndo, redo: historyRef.current.canRedo })
   }, [setNodes, setEdges])
-
-  useEffect(() => {
-    if (!loaded || !readyToSaveRef.current || artifacts.length === 0) return
-    const nodes = contentNodes
-    const additions: StoryNode[] = []
-    const linkedEdges: StoryEdge[] = []
-
-    for (const artifact of artifacts) {
-      if ((dismissedArtifacts[artifact.id] ?? -1) >= artifact.timestamp) continue
-      const matchingArtifactNodes = nodes.filter((node) => node.data.artifactId === artifact.id)
-      const existingArtifactNode = matchingArtifactNodes[0]
-      const sequence = nodes.length + additions.length + 1
-
-      if (artifact.type === 'storyboard') {
-        if (existingArtifactNode) continue
-        const shots = parseStoryboard(artifact.content)
-        const originY = 80 + Math.floor(sequence / 2) * 80
-        shots.forEach((shot, shotOffset) => {
-          const imageId = `${artifact.id}-shot-${shot.index}-image`
-          const videoId = `${artifact.id}-shot-${shot.index}-video`
-          const existingImage = nodes.find((node) => node.id === imageId)
-          const existingVideo = nodes.find((node) => node.id === videoId)
-          const imageNode: StoryNode = {
-            ...makeNode('image', shot.index, { x: 100, y: originY + shotOffset * 330 }),
-            id: imageId,
-            data: {
-              kind: 'image',
-              title: `镜头 ${shot.index} · 图片`,
-              prompt: shot.textToImagePrompt || shot.scene,
-              artifactId: artifact.id,
-              aspectRatio: '16:9',
-              sourcePath: shot.imageSource,
-              sourceHistory: shot.imageSourceHistory,
-              preview: shot.imageSource && currentProject
-                ? `workspace://${currentProject.id}/${shot.imageSource.split('/').map(encodeURIComponent).join('/')}`
-                : undefined,
-            },
-          }
-          const videoNode: StoryNode = {
-            ...makeNode('video', shot.index, { x: 620, y: originY + shotOffset * 330 }),
-            id: videoId,
-            data: {
-              kind: 'video',
-              title: `镜头 ${shot.index} · 视频`,
-              prompt: shot.imageToVideoPrompt || shot.camera || shot.scene,
-              aspectRatio: '16:9',
-              duration: normalizeVideoDuration(shot.duration),
-              sourcePath: shot.videoSource,
-              sourceHistory: shot.videoSourceHistory,
-              preview: shot.videoSource && currentProject
-                ? `workspace://${currentProject.id}/${shot.videoSource.split('/').map(encodeURIComponent).join('/')}`
-                : undefined,
-            },
-          }
-          if (!existingImage) additions.push(imageNode)
-          if (!existingVideo) additions.push(videoNode)
-          linkedEdges.push(
-            makeLinkedEdge(
-              `${imageId}-to-video`,
-              imageNode.id,
-              videoNode.id,
-            ),
-          )
-        })
-        continue
-      }
-
-    }
-
-    if (additions.length > 0) {
-      setNodes((current) => [...current, ...additions])
-    }
-    if (linkedEdges.length > 0) {
-      setEdges((current) => {
-        const existingIds = new Set(current.map((edge) => edge.id))
-        const freshEdges = linkedEdges.filter((edge) => !existingIds.has(edge.id))
-        return freshEdges.length > 0 ? [...current, ...freshEdges] : current
-      })
-    }
-    const rect = canvasContainerRef.current?.getBoundingClientRect()
-    const center = rect ? screenToFlowPosition({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }) : { x: 160, y: 120 }
-    setNodes(current => syncCanvasArtifacts(current, artifacts, dismissedArtifacts, makeNode,
-      (items, width) => vacantNodePosition(items, center, width)))
-  }, [artifacts, contentNodes, dismissedArtifacts, loaded, setEdges, setNodes, screenToFlowPosition])
 
   const handleNodesChange = useCallback((changes: NodeChange<StoryNode>[]) => {
     changes = filterUnchangedNodeMeasurements(changes, nodesRef.current)

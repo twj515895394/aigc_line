@@ -22,7 +22,7 @@ interface AppState {
   agentThinkingByProject: Record<string, boolean>;
   currentPage: 'home' | 'project' | 'settings';
   artifacts: Artifact[];
-  /** Artifacts the user clicked on the canvas - attached to the next message */
+  /** Chat artifacts the user attached to the next message */
   referencedArtifacts: ArtifactRef[];
   /** Canvas nodes attached to the next user message */
   referencedCanvasNodes: CanvasNodeRef[];
@@ -56,8 +56,8 @@ let chatHistorySequence = 0;
 const agentRuntimeSequence = new Map<string, number>();
 
 // Artifacts are keyed by their source file: re-pushing the same path updates
-// the existing entry in place (keeping its id, so canvas elements stay linked
-// and simply re-render) instead of stacking duplicate cards.
+// the existing entry in place (keeping its id, so chat references stay linked)
+// instead of stacking duplicate cards.
 function upsertArtifact(list: Artifact[], artifact: Artifact): Artifact[] {
   if (!artifact.path) return [...list, artifact];
   const index = list.findIndex((a) => a.path === artifact.path);
@@ -98,7 +98,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       ),
     })),
 
-  // Dedup by id - re-clicking the same canvas card must not stack chips
+  // Dedup by id - re-attaching the same chat card must not stack chips
   addArtifactReference: (ref) =>
     set((state) =>
       state.referencedArtifacts.some((r) => r.id === ref.id)
